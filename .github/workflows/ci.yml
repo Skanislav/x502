@@ -12,7 +12,6 @@ concurrency:
 
 env:
   NODE_VERSION: "22"
-  PNPM_VERSION: "10.33.0"
 
 jobs:
   lint:
@@ -24,19 +23,23 @@ jobs:
           submodules: recursive
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+
+      - name: diagnostic versions
+        run: |
+          node --version
+          pnpm --version
+          which pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-
-      - run: pnpm install --frozen-lockfile
 
       - name: forge fmt --check
         run: forge fmt --check
@@ -68,10 +71,6 @@ jobs:
         run: forge test -vvv
         working-directory: contracts
 
-      - name: gas snapshot (informational)
-        run: forge snapshot --check || true
-        working-directory: contracts
-
   typescript:
     name: typescript (vitest)
     runs-on: ubuntu-latest
@@ -81,23 +80,21 @@ jobs:
           submodules: recursive
 
       - uses: pnpm/action-setup@v4
-        with:
-          version: ${{ env.PNPM_VERSION }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
 
-      - run: pnpm install --frozen-lockfile
-
-      # The integration test rebuilds bytecode from the committed abis.ts,
-      # but compiling the contracts here once also catches drift between
-      # checked-in ABIs and the current Solidity sources.
+      # Compiling here once also catches drift between checked-in ABIs and
+      # the current Solidity sources (the integration test rebuilds bytecode
+      # from packages/shared/src/abis.ts).
       - name: forge build (drift check)
         run: forge build
         working-directory: contracts
