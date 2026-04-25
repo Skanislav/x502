@@ -14,9 +14,11 @@ const target = join(__dirname, "../src/abis.ts");
 
 const sources = {
   bountyVault: "BountyVault.sol/BountyVault.json",
+  gitHubFactReceiver: "GitHubFactReceiver.sol/GitHubFactReceiver.json",
   mockUSDC: "MockUSDC.sol/MockUSDC.json",
   mockAgentRegistry: "MockAgentRegistry.sol/MockAgentRegistry.json",
   mockGitHubFactProvider: "MockGitHubFactProvider.sol/MockGitHubFactProvider.json",
+  mockFunctionsRouter: "MockFunctionsRouter.sol/MockFunctionsRouter.json",
 } as const;
 
 const lines: string[] = [

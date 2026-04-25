@@ -1,4 +1,5 @@
 import type { Kind, SignedAttestation } from "@x502/shared";
+import type { Hono } from "hono";
 import type { Address, Hex } from "viem";
 
 /// Triggers a fact request on chain and resolves with the fact blob when the
@@ -49,16 +50,15 @@ export interface IRepoRegistry {
   resolveSlug(repoId: Hex): string | undefined;
 }
 
-/// x402 anti-spam gate. Real impl wraps `x402-express`/`x402-hono`. Mock impl
-/// is a no-op.
+/// x402 anti-spam gate. Real impl wraps `x402-hono`'s paymentMiddleware. Mock
+/// impl is a no-op. Mounts onto the given app — `paymentMiddleware` registers
+/// itself globally and uses path patterns to gate, so this is the natural seam.
 export interface IPaymentGate {
-  /// Returns null if request may proceed, or a Hono Response if it should be
-  /// short-circuited (e.g. 402 Payment Required).
-  check(headers: Headers): Promise<Response | null>;
+  apply(app: Hono): void;
 }
 
 export class NoopPaymentGate implements IPaymentGate {
-  async check(): Promise<Response | null> {
-    return null;
+  apply(_app: Hono): void {
+    // pass-through
   }
 }

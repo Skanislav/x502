@@ -6,3 +6,5 @@ export * from "./adapters/viem-vault.js";
 export * from "./adapters/viem-fact-provider.js";
 export * from "./adapters/fetch-verifier.js";
 export * from "./adapters/repo-registry.js";
+export * from "./adapters/x402-gate.js";
+export * from "./adapters/x402-fetch.js";

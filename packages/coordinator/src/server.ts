@@ -83,14 +83,15 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
   const claims = new Map<Hex, ClaimState>();
   const app = new Hono();
 
+  // Mount the x402 (or noop) gate. It registers a global middleware that
+  // matches the routes it's configured to gate (typically /claim).
+  paymentGate.apply(app);
+
   app.get("/health", (c) =>
     c.json({ ok: true, knownClaims: claims.size, verifiers: opts.verifiers.length }),
   );
 
   app.post("/claim", async (c) => {
-    const gateResp = await paymentGate.check(c.req.raw.headers);
-    if (gateResp) return gateResp;
-
     let parsed: ClaimRequestBody;
     try {
       parsed = parseClaim((await c.req.json()) as PostClaimBody);
