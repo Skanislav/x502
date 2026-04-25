@@ -1,0 +1,29 @@
+# Foundry
+contracts/cache/
+contracts/out/
+contracts/broadcast/
+
+# Node
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
+dist/
+build/
+.next/
+.turbo/
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# OS
+.DS_Store
+*.log
+*.pid
+
+# Editor
+.vscode/
+.idea/
+*.swp

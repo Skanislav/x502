@@ -1,0 +1,23 @@
+{
+  "name": "x502",
+  "private": true,
+  "version": "0.0.0",
+  "description": "x502 — protocol for services to pay agents for verifiable GitHub outcomes",
+  "license": "MIT",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "test:contracts": "cd contracts && forge test",
+    "test:integration": "pnpm --filter @x502/coordinator test:integration"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
