@@ -15,7 +15,8 @@
       "**/contracts/cache",
       "**/.next",
       "**/coverage",
-      "**/abis.ts"
+      "**/abis.ts",
+      "demo/**"
     ]
   },
   "organizeImports": {
