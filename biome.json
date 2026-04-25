@@ -16,7 +16,8 @@
       "**/.next",
       "**/coverage",
       "**/abis.ts",
-      "demo/**"
+      "demo/**",
+      "packages/web/**"
     ]
   },
   "organizeImports": {
