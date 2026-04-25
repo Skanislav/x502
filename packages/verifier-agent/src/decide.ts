@@ -1,5 +1,5 @@
-import type { Address, Hex } from "viem";
 import type { Kind } from "@x502/shared";
+import type { Address, Hex } from "viem";
 
 export interface VerifyContext {
   repoSlug: string;
@@ -12,9 +12,7 @@ export interface VerifyContext {
   saltReveal?: Hex;
 }
 
-export type DecisionOutcome =
-  | { accept: true; reason: string }
-  | { accept: false; reason: string };
+export type DecisionOutcome = { accept: true; reason: string } | { accept: false; reason: string };
 
 /// Pluggable decision policy. The mock impl always accepts (used in CI/local
 /// integration tests). The Claude-backed impl pulls the GH issue/PR + the

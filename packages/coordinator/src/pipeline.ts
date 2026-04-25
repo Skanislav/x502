@@ -1,11 +1,7 @@
-import { keccak256, type Hex } from "viem";
 import type { Kind, SignedAttestation } from "@x502/shared";
+import { type Hex, keccak256 } from "viem";
 
-import type {
-  IFactProvider,
-  IVaultWriter,
-  IVerifierClient,
-} from "./providers.js";
+import type { IFactProvider, IVaultWriter, IVerifierClient } from "./providers.js";
 import type { ClaimState } from "./types.js";
 
 export interface PipelineDeps {
@@ -25,7 +21,12 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
 
   // 1) Trigger Chainlink Functions fact request and verifier fan-out in parallel.
   const factPromise = (async () => {
-    await deps.factProvider.requestFact(claimId, request.repoSlug, request.externalId, request.kind);
+    await deps.factProvider.requestFact(
+      claimId,
+      request.repoSlug,
+      request.externalId,
+      request.kind,
+    );
     return deps.factProvider.awaitFact(claimId, deps.factTimeoutMs);
   })();
 

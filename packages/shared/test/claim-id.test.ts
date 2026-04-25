@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { deriveClaimId, deriveCommitment, repoIdFromSlug } from "../src/claim-id.js";
 import { Kind } from "../src/types.js";
 

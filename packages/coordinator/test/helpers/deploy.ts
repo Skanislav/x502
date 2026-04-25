@@ -73,4 +73,10 @@ export async function deployAll(
   return { usdc, registry, factProvider, vault };
 }
 
-export { bountyVaultAbi, mockAgentRegistryAbi, mockGitHubFactProviderAbi, mockUSDCAbi, parseEventLogs };
+export {
+  bountyVaultAbi,
+  mockAgentRegistryAbi,
+  mockGitHubFactProviderAbi,
+  mockUSDCAbi,
+  parseEventLogs,
+};

@@ -1,13 +1,9 @@
+import { type Attestation, type Kind, deriveClaimId } from "@x502/shared";
 import { Hono } from "hono";
 import { type Address, type Hex, isAddress, isHex } from "viem";
-import {
-  deriveClaimId,
-  Kind,
-  type Attestation,
-} from "@x502/shared";
 
 import type { DecisionPolicy } from "./decide.js";
-import { signAttestation, type SignerConfig } from "./sign.js";
+import { type SignerConfig, signAttestation } from "./sign.js";
 
 export interface VerifierServerOptions {
   signer: SignerConfig;
@@ -45,7 +41,8 @@ function parseBody(b: VerifyBody) {
     recipient: b.recipient as Address,
     deadline: BigInt(b.deadline as string | number),
     factHash: b.factHash as Hex,
-    agentIdReveal: b.agentIdReveal !== undefined ? BigInt(b.agentIdReveal as string | number) : undefined,
+    agentIdReveal:
+      b.agentIdReveal !== undefined ? BigInt(b.agentIdReveal as string | number) : undefined,
     saltReveal: b.saltReveal !== undefined ? (b.saltReveal as Hex) : undefined,
   };
 }

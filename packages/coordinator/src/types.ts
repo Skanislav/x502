@@ -1,5 +1,5 @@
-import type { Address, Hex } from "viem";
 import type { Kind, SignedAttestation } from "@x502/shared";
+import type { Address, Hex } from "viem";
 
 export type ClaimStatus = "verifying" | "ready" | "paid" | "failed";
 

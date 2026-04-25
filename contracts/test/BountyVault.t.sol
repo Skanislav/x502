@@ -30,10 +30,10 @@ contract BountyVaultTest is Test {
     uint256 internal constant OUTCOME_FEE = 100_000; // $0.10 per verifier
 
     BountyVault.Prices internal defaultPrices = BountyVault.Prices({
-        report: 5_000_000,      // $5
-        triage: 2_000_000,      // $2
-        fix: 50_000_000,        // $50
-        docsTests: 30_000_000   // $30
+        report: 5_000_000, // $5
+        triage: 2_000_000, // $2
+        fix: 50_000_000, // $50
+        docsTests: 30_000_000 // $30
     });
 
     function setUp() public {
@@ -80,17 +80,15 @@ contract BountyVaultTest is Test {
         bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(kind));
 
         // Oracle delivers the fact
-        bytes memory factBlob = abi.encode(uint8(1), uint64(123_456), bytes32(uint256(0xABCD)), claimant);
+        bytes memory factBlob =
+            abi.encode(uint8(1), uint64(123_456), bytes32(uint256(0xABCD)), claimant);
         factProvider.mockFulfill(cid, factBlob);
 
         // Two of three agents sign
         uint256 deadline = block.timestamp + 30 minutes;
         bytes32 factHash = keccak256(factBlob);
         Attestations.Attestation memory att = Attestations.Attestation({
-            claimId: cid,
-            recipient: claimant,
-            deadline: deadline,
-            factHash: factHash
+            claimId: cid, recipient: claimant, deadline: deadline, factHash: factHash
         });
 
         uint256[] memory signingAgents = new uint256[](2);
@@ -131,13 +129,16 @@ contract BountyVaultTest is Test {
             claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
         });
         uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0]; ids[1] = agentIds[1];
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(agentKeys[0], att);
         sigs[1] = _sign(agentKeys[1], att);
 
         vm.expectRevert(abi.encodeWithSelector(BountyVault.AlreadyPaid.selector, cid));
-        vault.payout(REPO_ID, 42, BountyVault.Kind.Fix, claimant, deadline, keccak256(factBlob), ids, sigs);
+        vault.payout(
+            REPO_ID, 42, BountyVault.Kind.Fix, claimant, deadline, keccak256(factBlob), ids, sigs
+        );
     }
 
     // ---------- signature checks ----------
@@ -159,7 +160,16 @@ contract BountyVaultTest is Test {
         sigs[0] = _sign(agentKeys[0], att);
 
         vm.expectRevert(BountyVault.InsufficientSignatures.selector);
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, keccak256(factBlob), ids, sigs);
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Fix,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
     }
 
     function test_payout_revertsOnDuplicateSigners() public {
@@ -181,7 +191,16 @@ contract BountyVaultTest is Test {
         sigs[1] = _sign(agentKeys[0], att);
 
         vm.expectRevert(abi.encodeWithSelector(BountyVault.DuplicateSigner.selector, agentIds[0]));
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, keccak256(factBlob), ids, sigs);
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Fix,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
     }
 
     function test_payout_revertsOnUntrustedSigner() public {
@@ -207,7 +226,16 @@ contract BountyVaultTest is Test {
         sigs[1] = _sign(k, att);
 
         vm.expectRevert(abi.encodeWithSelector(BountyVault.UntrustedAgent.selector, untrustedId));
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, keccak256(factBlob), ids, sigs);
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Fix,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
     }
 
     function test_payout_revertsOnInvalidSignature() public {
@@ -229,7 +257,16 @@ contract BountyVaultTest is Test {
         sigs[1] = _sign(agentKeys[2], att); // claims to be agent1, signed by agent2
 
         vm.expectRevert(abi.encodeWithSelector(BountyVault.InvalidSignature.selector, agentIds[1]));
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, keccak256(factBlob), ids, sigs);
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Fix,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
     }
 
     // ---------- fact gating ----------
@@ -246,13 +283,16 @@ contract BountyVaultTest is Test {
         });
 
         uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0]; ids[1] = agentIds[1];
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(agentKeys[0], att);
         sigs[1] = _sign(agentKeys[1], att);
 
         vm.expectRevert(BountyVault.FactNotReady.selector);
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, ids, sigs);
+        vault.payout(
+            REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, ids, sigs
+        );
     }
 
     function test_payout_revertsOnFactHashMismatch() public {
@@ -267,13 +307,16 @@ contract BountyVaultTest is Test {
         });
 
         uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0]; ids[1] = agentIds[1];
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(agentKeys[0], att);
         sigs[1] = _sign(agentKeys[1], att);
 
         vm.expectRevert(BountyVault.FactHashMismatch.selector);
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, wrongFactHash, ids, sigs);
+        vault.payout(
+            REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, wrongFactHash, ids, sigs
+        );
     }
 
     // ---------- deadline ----------
@@ -290,14 +333,24 @@ contract BountyVaultTest is Test {
         });
 
         uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0]; ids[1] = agentIds[1];
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(agentKeys[0], att);
         sigs[1] = _sign(agentKeys[1], att);
 
         vm.warp(deadline + 1);
         vm.expectRevert(BountyVault.DeadlineExpired.selector);
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, keccak256(factBlob), ids, sigs);
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Fix,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
     }
 
     // ---------- balance ----------
@@ -318,13 +371,23 @@ contract BountyVaultTest is Test {
             claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
         });
         uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0]; ids[1] = agentIds[1];
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(agentKeys[0], att);
         sigs[1] = _sign(agentKeys[1], att);
 
         vm.expectRevert(BountyVault.InsufficientRepoBalance.selector);
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, keccak256(factBlob), ids, sigs);
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Fix,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
     }
 
     // ---------- access control ----------
@@ -365,12 +428,22 @@ contract BountyVaultTest is Test {
             claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
         });
         uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0]; ids[1] = agentIds[1];
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
         bytes[] memory sigs = new bytes[](2);
         sigs[0] = _sign(agentKeys[0], att);
         sigs[1] = _sign(agentKeys[1], att);
 
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, keccak256(factBlob), ids, sigs);
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Fix,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
     }
 
     function _isReady(bytes32 cid) internal view returns (bool ready) {

@@ -1,5 +1,5 @@
-import type { Address, Hex } from "viem";
 import type { Kind, SignedAttestation } from "@x502/shared";
+import type { Address, Hex } from "viem";
 
 /// Triggers a fact request on chain and resolves with the fact blob when the
 /// oracle (real: Chainlink Functions; mock: test helper) fulfills.

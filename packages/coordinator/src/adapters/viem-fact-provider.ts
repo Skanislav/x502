@@ -1,12 +1,6 @@
-import {
-  type Account,
-  type Address,
-  type Hex,
-  type PublicClient,
-  type WalletClient,
-} from "viem";
-import { mockGitHubFactProviderAbi } from "@x502/shared/abis";
 import type { Kind } from "@x502/shared";
+import { mockGitHubFactProviderAbi } from "@x502/shared/abis";
+import type { Account, Address, Hex, PublicClient, WalletClient } from "viem";
 
 import type { IFactProvider } from "../providers.js";
 

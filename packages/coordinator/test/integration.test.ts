@@ -4,45 +4,40 @@
 ///
 /// Requires `anvil` on PATH (i.e. `~/.foundry/bin`).
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
-  createPublicClient,
-  createWalletClient,
   http,
-  parseUnits,
-  zeroAddress,
   type Account,
   type Address,
   type Hex,
   type PublicClient,
   type WalletClient,
+  createPublicClient,
+  createWalletClient,
+  parseUnits,
+  zeroAddress,
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import {
-  Kind,
-  deriveClaimId,
-  repoIdFromSlug,
-  type SignedAttestation,
-} from "@x502/shared";
+import { Kind, type SignedAttestation, deriveClaimId, repoIdFromSlug } from "@x502/shared";
 import { AcceptAllPolicy, buildVerifierApp } from "@x502/verifier-agent";
 
 import {
-  buildCoordinator,
   FetchVerifierClient,
   StaticRepoRegistry,
   ViemFactProvider,
   ViemVaultWriter,
+  buildCoordinator,
 } from "../src/index.js";
-import { startAnvil, type AnvilHandle } from "./helpers/anvil.ts";
+import { type AnvilHandle, startAnvil } from "./helpers/anvil.js";
 import {
   bountyVaultAbi,
   deployAll,
   mockAgentRegistryAbi,
   mockGitHubFactProviderAbi,
   mockUSDCAbi,
-} from "./helpers/deploy.ts";
+} from "./helpers/deploy.js";
 
 let anvil: AnvilHandle;
 
@@ -60,8 +55,7 @@ describe("end-to-end claim → payout (all mocks, kind=fix)", () => {
   it("pays the claimant + verifiers via the vault", async () => {
     // ---- chain clients ----
     // Anvil's first prefunded key — deployer + repo owner.
-    const deployerKey =
-      "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as Hex;
+    const deployerKey = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as Hex;
     const deployer = privateKeyToAccount(deployerKey);
 
     const transport = http(anvil.rpcUrl);
@@ -76,17 +70,29 @@ describe("end-to-end claim → payout (all mocks, kind=fix)", () => {
     );
 
     // ---- 3 verifier identities, registered in MockAgentRegistry ----
-    const verifierKeys = [generatePrivateKey(), generatePrivateKey(), generatePrivateKey()];
-    const verifierAccounts: Account[] = verifierKeys.map(privateKeyToAccount);
-    const verifierIds = [101n, 102n, 103n];
-    const verifierWallets = verifierAccounts.map((a) => a.address);
+    const verifierKeys = [
+      generatePrivateKey(),
+      generatePrivateKey(),
+      generatePrivateKey(),
+    ] as const;
+    const verifierAccounts: [Account, Account, Account] = [
+      privateKeyToAccount(verifierKeys[0]),
+      privateKeyToAccount(verifierKeys[1]),
+      privateKeyToAccount(verifierKeys[2]),
+    ];
+    const verifierIds: [bigint, bigint, bigint] = [101n, 102n, 103n];
+    const verifierWallets: [Address, Address, Address] = [
+      verifierAccounts[0].address,
+      verifierAccounts[1].address,
+      verifierAccounts[2].address,
+    ];
 
     for (let i = 0; i < 3; i++) {
       await wallet.writeContract({
         address: registry,
         abi: mockAgentRegistryAbi,
         functionName: "setAgentWallet",
-        args: [verifierIds[i], verifierWallets[i]],
+        args: [verifierIds[i]!, verifierWallets[i]!],
       });
     }
 
@@ -138,7 +144,8 @@ describe("end-to-end claim → payout (all mocks, kind=fix)", () => {
     const inProcessFetch = (host: string) => {
       const app = verifierApps[Number(host.split("-")[1])]!;
       return (async (url: string | URL | Request, init?: RequestInit) => {
-        const u = typeof url === "string" ? new URL(url) : url instanceof URL ? url : new URL(url.url);
+        const u =
+          typeof url === "string" ? new URL(url) : url instanceof URL ? url : new URL(url.url);
         return app.request(u.pathname + u.search, init as RequestInit);
       }) as typeof fetch;
     };
@@ -184,7 +191,12 @@ describe("end-to-end claim → payout (all mocks, kind=fix)", () => {
     const claimId = deriveClaimId(repoId, externalId, kind);
 
     // The factBlob the oracle would deliver. Same shape we agreed onchain.
-    const factBlob = encodeFactBlob({ status: 1, mergedBlock: 12345n, labelMask: zeroBytes32, ghAuthorBinding: claimant });
+    const factBlob = encodeFactBlob({
+      status: 1,
+      mergedBlock: 12345n,
+      labelMask: zeroBytes32,
+      ghAuthorBinding: claimant,
+    });
 
     // Pre-arm the mock oracle: as soon as the coordinator calls requestFact,
     // the test fulfills it. We use a viem watcher so we don't race the call.
@@ -192,7 +204,9 @@ describe("end-to-end claim → payout (all mocks, kind=fix)", () => {
       address: factProvider,
       abi: mockGitHubFactProviderAbi,
       eventName: "FactFulfilled",
-      onLogs: () => { /* will be cleaned up below */ },
+      onLogs: () => {
+        /* will be cleaned up below */
+      },
     });
     // Set up a one-shot "intercept the next requestFact and fulfill" by
     // watching for the requestId map update — simpler to just poll the test.
@@ -303,7 +317,7 @@ describe("end-to-end claim → payout (all mocks, kind=fix)", () => {
   }, 60_000);
 });
 
-const zeroBytes32 = ("0x" + "00".repeat(32)) as Hex;
+const zeroBytes32 = `0x${"00".repeat(32)}` as Hex;
 
 function encodeFactBlob(args: {
   status: number;

@@ -170,10 +170,7 @@ contract BountyVault is EIP712, ReentrancyGuard {
         // Verify M-of-N signatures
         L.digest = hashAttestation(
             Attestations.Attestation({
-                claimId: L.claimId,
-                recipient: recipient,
-                deadline: deadline,
-                factHash: factHash
+                claimId: L.claimId, recipient: recipient, deadline: deadline, factHash: factHash
             })
         );
         _verifySignatures(cfg, agentIds, signatures, L.digest);

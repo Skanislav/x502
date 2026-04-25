@@ -1,24 +1,24 @@
-import { describe, it, expect } from "vitest";
 import {
-  createWalletClient,
   http,
   type Address,
   type Hex,
+  createWalletClient,
   recoverTypedDataAddress,
   zeroAddress,
 } from "viem";
-import { privateKeyToAccount, generatePrivateKey } from "viem/accounts";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
+import { describe, expect, it } from "vitest";
 
 import {
   ATTESTATION_TYPES,
+  Kind,
   attestationDomain,
   deriveClaimId,
-  Kind,
   repoIdFromSlug,
 } from "@x502/shared";
 
-import { buildVerifierApp, AcceptAllPolicy, RejectAllPolicy } from "../src/index.js";
+import { AcceptAllPolicy, RejectAllPolicy, buildVerifierApp } from "../src/index.js";
 
 function makeApp(opts: { policy: "accept" | "reject"; vault?: Address }) {
   const pk = generatePrivateKey();
@@ -56,7 +56,7 @@ describe("verifier-agent /verify", () => {
         kind: Kind.Fix,
         recipient: zeroAddress,
         deadline: "1000",
-        factHash: "0x" + "ab".repeat(32),
+        factHash: `0x${"ab".repeat(32)}`,
       }),
     });
     expect(res.status).toBe(403);
@@ -69,7 +69,7 @@ describe("verifier-agent /verify", () => {
     const kind = Kind.Fix;
     const recipient = "0x24582544C98a86eE59687c4D5B55D78f4FffA666" as const;
     const deadline = 9_999_999_999n;
-    const factHash = ("0x" + "cd".repeat(32)) as Hex;
+    const factHash = `0x${"cd".repeat(32)}` as Hex;
 
     const res = await app.request("/verify", {
       method: "POST",

@@ -16,7 +16,14 @@ contract MockGitHubFactProvider is IGitHubFactProvider {
     mapping(bytes32 => bytes32) public lastRequestId;
     uint256 private _nonce;
 
-    function requestFact(bytes32 claimId, string calldata, /*repo*/ uint256, /*externalId*/ uint8 /*kind*/ )
+    function requestFact(
+        bytes32 claimId,
+        string calldata,
+        /*repo*/
+        uint256,
+        /*externalId*/
+        uint8 /*kind*/
+    )
         external
         override
         returns (bytes32 requestId)

@@ -1,8 +1,9 @@
 import { Hono } from "hono";
-import { isAddress, type Address, type Hex } from "viem";
+import { type Address, type Hex, isAddress } from "viem";
 
-import { deriveClaimId, Kind, type KindName } from "@x502/shared";
+import { Kind, type KindName, deriveClaimId } from "@x502/shared";
 
+import { runClaimPipeline } from "./pipeline.js";
 import {
   type IFactProvider,
   type IPaymentGate,
@@ -11,7 +12,6 @@ import {
   type IVerifierClient,
   NoopPaymentGate,
 } from "./providers.js";
-import { runClaimPipeline } from "./pipeline.js";
 import type { ClaimRequestBody, ClaimState } from "./types.js";
 
 const KindByName: Record<KindName, Kind> = {
@@ -61,7 +61,8 @@ function parseClaim(b: PostClaimBody): ClaimRequestBody {
     externalId: BigInt(b.externalId as string | number),
     kind: KindByName[b.kind as KindName],
     recipient: b.recipient as Address,
-    agentIdReveal: b.agentIdReveal !== undefined ? BigInt(b.agentIdReveal as string | number) : undefined,
+    agentIdReveal:
+      b.agentIdReveal !== undefined ? BigInt(b.agentIdReveal as string | number) : undefined,
     saltReveal: b.saltReveal !== undefined ? (b.saltReveal as Hex) : undefined,
   };
 }
@@ -169,7 +170,12 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
     }
     // Pending: 202 + Retry-After
     return c.json(
-      { status: state.status, claimId, factReady: state.factHash !== undefined, sigs: state.attestations.length },
+      {
+        status: state.status,
+        claimId,
+        factReady: state.factHash !== undefined,
+        sigs: state.attestations.length,
+      },
       202,
       { "Retry-After": String(pollRetryAfterSec) },
     );

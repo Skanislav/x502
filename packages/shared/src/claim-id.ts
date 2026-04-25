@@ -1,4 +1,4 @@
-import { encodeAbiParameters, keccak256, type Hex } from "viem";
+import { type Hex, encodeAbiParameters, keccak256 } from "viem";
 import type { Kind } from "./types.js";
 
 /// Canonical claimId derivation. Must stay in lockstep with
@@ -14,12 +14,7 @@ export function deriveClaimId(repoId: Hex, externalId: bigint, kind: Kind): Hex 
 
 /// Canonical commitment for the GH-body proof:
 ///   keccak256(agentId || repoId || externalId || salt)
-export function deriveCommitment(
-  agentId: bigint,
-  repoId: Hex,
-  externalId: bigint,
-  salt: Hex,
-): Hex {
+export function deriveCommitment(agentId: bigint, repoId: Hex, externalId: bigint, salt: Hex): Hex {
   return keccak256(
     encodeAbiParameters(
       [{ type: "uint256" }, { type: "bytes32" }, { type: "uint256" }, { type: "bytes32" }],

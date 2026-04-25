@@ -10,12 +10,17 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
-    "lint": "pnpm -r lint",
+    "test": "pnpm test:contracts && pnpm test:ts",
     "test:contracts": "cd contracts && forge test",
-    "test:integration": "pnpm --filter @x502/coordinator test:integration"
+    "test:ts": "pnpm --filter @x502/shared exec vitest run && pnpm --filter @x502/verifier-agent exec vitest run && pnpm --filter @x502/coordinator exec vitest run",
+    "lint": "pnpm lint:sol && pnpm lint:ts",
+    "lint:sol": "cd contracts && forge fmt --check",
+    "lint:ts": "biome check packages",
+    "fmt": "cd contracts && forge fmt && cd .. && biome check --write packages",
+    "typecheck": "pnpm -r exec tsc --noEmit"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@types/node": "^22.7.0",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"

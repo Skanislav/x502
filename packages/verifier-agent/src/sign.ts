@@ -1,5 +1,5 @@
+import { type Attestation, attestationTypedData } from "@x502/shared";
 import type { Account, Address, Hex, WalletClient } from "viem";
-import { attestationTypedData, type Attestation } from "@x502/shared";
 
 export interface SignerConfig {
   agentId: bigint;
