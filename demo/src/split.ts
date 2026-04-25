@@ -1,9 +1,8 @@
 /**
  * Split an integer total evenly across `n` buckets.
  *
- * Returns an array of length `n` whose elements sum to `total`.
- * Used by the tip-pool router to divide micropayments without leaving wei
- * behind — every input cent must land in exactly one output bucket.
+ * Returns an array of length `n` whose elements sum to `total`. Any leftover
+ * units after integer division are distributed one-per-bucket from the front.
  */
 export function splitEvenly(total: number, n: number): number[] {
   if (!Number.isInteger(total) || !Number.isInteger(n)) {
@@ -12,9 +11,7 @@ export function splitEvenly(total: number, n: number): number[] {
   if (n <= 0) throw new RangeError("splitEvenly: n must be positive");
   if (total < 0) throw new RangeError("splitEvenly: total must be >= 0");
 
-  // BUG (planted for x502 demo): when `total` is not divisible by `n`,
-  // integer division loses the remainder and the returned slots no longer
-  // sum to `total`. Reporter's claim points at this.
-  const each = Math.floor(total / n);
-  return new Array(n).fill(each);
+  const base = Math.floor(total / n);
+  const remainder = total % n;
+  return Array.from({ length: n }, (_, i) => base + (i < remainder ? 1 : 0));
 }
