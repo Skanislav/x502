@@ -8,6 +8,12 @@ solc_version = "0.8.26"
 optimizer = true
 optimizer_runs = 1000
 via_ir = false
+# Deterministic bytecode across machines — drops the IPFS metadata hash that
+# otherwise embeds machine-dependent paths into the bytecode tail. Required
+# for the drift check in CI (`forge build` + extract-abis must produce the
+# same bytes the committed abis.ts has).
+bytecode_hash = "none"
+cbor_metadata = false
 fs_permissions = [{ access = "read", path = "./" }]
 
 [fmt]
