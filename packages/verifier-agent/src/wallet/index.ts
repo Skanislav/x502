@@ -25,11 +25,16 @@ export function pickWalletProviderFromEnv(env: NodeJS.ProcessEnv = process.env):
     case "cdp": {
       const agentId = env.VERIFIER_AGENT_ID ?? "0";
       const accountName = env.VERIFIER_AGENT_NAME ?? `x502-verifier-${agentId}`;
+      const mode = (env.CDP_WALLET_MODE ?? "smart").toLowerCase();
+      if (mode !== "smart" && mode !== "eoa") {
+        throw new Error(`Unknown CDP_WALLET_MODE=${mode}; expected "smart" or "eoa"`);
+      }
       return new CdpWalletProvider({
         apiKeyId: env.CDP_API_KEY_ID,
         apiKeySecret: env.CDP_API_KEY_SECRET,
         walletSecret: env.CDP_WALLET_SECRET,
         accountName,
+        mode: mode as "smart" | "eoa",
         network:
           env.VERIFIER_NETWORK === "base"
             ? "base"

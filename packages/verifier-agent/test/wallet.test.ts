@@ -62,7 +62,7 @@ describe("pickWalletProviderFromEnv", () => {
     );
   });
 
-  it("returns CdpWalletProvider when WALLET_PROVIDER=cdp", () => {
+  it("returns CdpWalletProvider (smart, default) when WALLET_PROVIDER=cdp", () => {
     // Constructor doesn't make a network call — only `bootstrap()` does — so
     // we can pin the type without real credentials.
     const provider = pickWalletProviderFromEnv({
@@ -73,6 +73,30 @@ describe("pickWalletProviderFromEnv", () => {
       CDP_WALLET_SECRET: "fake",
     });
     expect(provider).toBeInstanceOf(CdpWalletProvider);
+  });
+
+  it("accepts CDP_WALLET_MODE=eoa", () => {
+    const provider = pickWalletProviderFromEnv({
+      WALLET_PROVIDER: "cdp",
+      CDP_WALLET_MODE: "eoa",
+      VERIFIER_AGENT_ID: "101",
+      CDP_API_KEY_ID: "fake",
+      CDP_API_KEY_SECRET: "fake",
+      CDP_WALLET_SECRET: "fake",
+    });
+    expect(provider).toBeInstanceOf(CdpWalletProvider);
+  });
+
+  it("rejects an unknown CDP_WALLET_MODE", () => {
+    expect(() =>
+      pickWalletProviderFromEnv({
+        WALLET_PROVIDER: "cdp",
+        CDP_WALLET_MODE: "wat",
+        CDP_API_KEY_ID: "fake",
+        CDP_API_KEY_SECRET: "fake",
+        CDP_WALLET_SECRET: "fake",
+      }),
+    ).toThrow(/CDP_WALLET_MODE/);
   });
 
   it("throws on unknown WALLET_PROVIDER", () => {
