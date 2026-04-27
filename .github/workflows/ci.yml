@@ -1,0 +1,117 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  lint:
+    name: lint (sol fmt + biome + tsc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: diagnostic versions
+        run: |
+          node --version
+          pnpm --version
+          which pnpm
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: forge fmt --check
+        run: forge fmt --check
+        working-directory: contracts
+
+      - name: biome check
+        run: pnpm exec biome ci packages
+
+      - name: tsc --noEmit (all packages)
+        run: pnpm typecheck
+
+  contracts:
+    name: contracts (forge test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: forge build
+        run: forge build --sizes
+        working-directory: contracts
+
+      - name: forge test
+        run: forge test -vvv
+        working-directory: contracts
+
+  typescript:
+    name: typescript (vitest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: pnpm install
+        run: pnpm install --frozen-lockfile
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      # Compiling here once also catches drift between checked-in ABIs and
+      # the current Solidity sources (the integration test rebuilds bytecode
+      # from packages/shared/src/abis.ts).
+      - name: forge build (drift check)
+        run: forge build
+        working-directory: contracts
+
+      - name: extract abis (drift check)
+        run: |
+          pnpm --filter @x502/shared extract-abis
+          if ! git diff --exit-code packages/shared/src/abis.ts; then
+            echo "::error::packages/shared/src/abis.ts is out of sync with contracts/. Run pnpm --filter @x502/shared extract-abis and commit."
+            exit 1
+          fi
+
+      - name: vitest (shared)
+        run: pnpm --filter @x502/shared exec vitest run
+
+      - name: vitest (verifier-agent)
+        run: pnpm --filter @x502/verifier-agent exec vitest run
+
+      - name: vitest (coordinator e2e)
+        run: pnpm --filter @x502/coordinator exec vitest run
