@@ -47,6 +47,8 @@ contract BountyVaultEdgesTest is Test {
         uint256[] agentIds
     );
 
+    event Withdrawn(bytes32 indexed repoId, address indexed to, uint256 amount);
+
     function setUp() public {
         usdc = new MockUSDC();
         registry = new MockAgentRegistry();
@@ -172,6 +174,142 @@ contract BountyVaultEdgesTest is Test {
             usdc.balanceOf(claimant),
             (prices.fix - 2 * OUTCOME_FEE) + (prices.docsTests - 2 * OUTCOME_FEE)
         );
+    }
+
+    // ---------- repo lifecycle edges ----------
+
+    function test_configureRepo_revertsForThresholdZero() public {
+        vm.prank(makeAddr("thresholdZeroOwner"));
+        vm.expectRevert(BountyVault.ThresholdZero.selector);
+        vault.configureRepo(
+            keccak256("github.com/owner/threshold-zero"), agentIds, 0, prices, OUTCOME_FEE
+        );
+    }
+
+    function test_deposit_revertsForUnconfiguredRepo() public {
+        address depositor = makeAddr("unconfiguredDepositor");
+        bytes32 repoId = keccak256("github.com/owner/unconfigured");
+
+        usdc.mint(depositor, DEPOSIT);
+        vm.startPrank(depositor);
+        usdc.approve(address(vault), DEPOSIT);
+        vm.expectRevert(BountyVault.RepoNotConfigured.selector);
+        vault.deposit(repoId, DEPOSIT);
+        vm.stopPrank();
+    }
+
+    function test_withdraw_revertsWhenBalanceTooLow() public {
+        vm.prank(makeAddr("ownerA"));
+        vm.expectRevert(BountyVault.InsufficientRepoBalance.selector);
+        vault.withdraw(REPO_A, DEPOSIT + 1);
+    }
+
+    function test_withdraw_succeedsForRepoOwner() public {
+        address ownerA = makeAddr("ownerA");
+        uint256 amount = 123_456;
+
+        vm.expectEmit(true, true, false, true, address(vault));
+        emit Withdrawn(REPO_A, ownerA, amount);
+
+        vm.prank(ownerA);
+        vault.withdraw(REPO_A, amount);
+
+        assertEq(vault.balanceOf(REPO_A), DEPOSIT - amount);
+        assertEq(usdc.balanceOf(ownerA), amount);
+    }
+
+    // ---------- payout edges ----------
+
+    // Current behavior pinned from USER_FLOW.md "Current vs. intent":
+    // the vault checks keccak256(factBlob) == factHash and verifier signatures,
+    // but it does not decode or enforce factBlob.status == 1.
+    function test_currentBehavior_payoutAcceptsStatusZero() public {
+        uint256 externalId = 500;
+        BountyVault.Kind kind = BountyVault.Kind.Fix;
+        bytes32 cid = Attestations.claimId(REPO_A, externalId, uint8(kind));
+        bytes memory factBlob = abi.encode(uint8(0), uint64(0), bytes32(0), claimant);
+        factProvider.mockFulfill(cid, factBlob);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        Attestations.Attestation memory att = Attestations.Attestation({
+            claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
+        });
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _sign(agentKeys[0], att);
+        sigs[1] = _sign(agentKeys[1], att);
+
+        vault.payout(REPO_A, externalId, kind, claimant, deadline, keccak256(factBlob), ids, sigs);
+
+        assertTrue(vault.isPaid(cid));
+    }
+
+    function test_payout_revertsOnLengthMismatch() public {
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
+        bytes[] memory sigs = new bytes[](1);
+
+        vm.expectRevert(BountyVault.LengthMismatch.selector);
+        vault.payout(
+            REPO_A,
+            501,
+            BountyVault.Kind.Fix,
+            claimant,
+            block.timestamp + 1 hours,
+            bytes32(0),
+            ids,
+            sigs
+        );
+    }
+
+    function test_payout_revertsOnPriceUnderflow() public {
+        BountyVault.Prices memory lowPrices =
+            BountyVault.Prices({report: 1, triage: 1, fix: OUTCOME_FEE * 2, docsTests: 1});
+
+        vm.prank(makeAddr("ownerA"));
+        vault.configureRepo(REPO_A, agentIds, 2, lowPrices, OUTCOME_FEE);
+
+        uint256 externalId = 502;
+        BountyVault.Kind kind = BountyVault.Kind.Fix;
+        bytes32 cid = Attestations.claimId(REPO_A, externalId, uint8(kind));
+        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        factProvider.mockFulfill(cid, factBlob);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        Attestations.Attestation memory att = Attestations.Attestation({
+            claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
+        });
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _sign(agentKeys[0], att);
+        sigs[1] = _sign(agentKeys[1], att);
+
+        vm.expectRevert(BountyVault.PriceUnderflow.selector);
+        vault.payout(REPO_A, externalId, kind, claimant, deadline, keccak256(factBlob), ids, sigs);
+    }
+
+    // ---------- views ----------
+
+    function test_views_coverRepoConfigAndDomainSeparator() public view {
+        assertEq(vault.thresholdOf(REPO_A), 2);
+        assertEq(vault.outcomeFeeOf(REPO_A), OUTCOME_FEE);
+        assertTrue(vault.domainSeparator() != bytes32(0));
+
+        uint256[] memory trustedAgents = vault.trustedAgentsOf(REPO_A);
+        assertEq(trustedAgents.length, agentIds.length);
+        for (uint256 i; i < agentIds.length; ++i) {
+            assertEq(trustedAgents[i], agentIds[i]);
+        }
+
+        assertEq(vault.priceOf(REPO_A, BountyVault.Kind.Report), prices.report);
+        assertEq(vault.priceOf(REPO_A, BountyVault.Kind.Triage), prices.triage);
+        assertEq(vault.priceOf(REPO_A, BountyVault.Kind.Fix), prices.fix);
+        assertEq(vault.priceOf(REPO_A, BountyVault.Kind.DocsTests), prices.docsTests);
     }
 
     // ---------- helpers ----------

@@ -16,6 +16,10 @@ contract GitHubFactReceiverTest is Test {
 
     bytes32 internal constant CLAIM_ID = keccak256("claim/42/fix");
 
+    event SourceUpdated(uint256 sourceLen);
+    event AuthorizerSet(address indexed authorizer);
+    event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
+
     function setUp() public {
         router = new MockFunctionsRouter();
         receiver = new GitHubFactReceiver(address(router), owner);
@@ -31,6 +35,64 @@ contract GitHubFactReceiverTest is Test {
         });
         receiver.setAuthorizer(authorizer);
         vm.stopPrank();
+    }
+
+    function test_constructor_setsOwnerAndInitialAuthorizer() public {
+        MockFunctionsRouter freshRouter = new MockFunctionsRouter();
+        GitHubFactReceiver freshReceiver = new GitHubFactReceiver(address(freshRouter), owner);
+
+        assertEq(freshReceiver.owner(), owner);
+        assertEq(freshReceiver.authorizer(), owner);
+
+        vm.prank(owner);
+        freshReceiver.setSource("return Functions.encodeUint256(0)");
+
+        vm.prank(owner);
+        bytes32 requestId = freshReceiver.requestFact(CLAIM_ID, "foo/bar", 0, 2);
+
+        assertEq(freshReceiver.requestIdOf(CLAIM_ID), requestId);
+        assertEq(freshReceiver.claimIdOfRequest(requestId), CLAIM_ID);
+    }
+
+    function test_setup_setsCurrentOwnerAndAuthorizer() public view {
+        assertEq(receiver.owner(), owner);
+        assertEq(receiver.authorizer(), authorizer);
+    }
+
+    function test_transferOwnership_emitsAndChangesOwner() public {
+        address newOwner = makeAddr("newOwner");
+
+        vm.expectEmit(true, true, false, true, address(receiver));
+        emit OwnershipTransferred(owner, newOwner);
+
+        vm.prank(owner);
+        receiver.transferOwnership(newOwner);
+
+        assertEq(receiver.owner(), newOwner);
+    }
+
+    function test_setSource_emitsLengthAndStoresSource() public {
+        string memory src = "return Functions.encodeUint256(1)";
+
+        vm.expectEmit(false, false, false, true, address(receiver));
+        emit SourceUpdated(bytes(src).length);
+
+        vm.prank(owner);
+        receiver.setSource(src);
+
+        assertEq(receiver.source(), src);
+    }
+
+    function test_setAuthorizer_emitsAndStoresAuthorizer() public {
+        address newAuthorizer = makeAddr("newAuthorizer");
+
+        vm.expectEmit(true, false, false, true, address(receiver));
+        emit AuthorizerSet(newAuthorizer);
+
+        vm.prank(owner);
+        receiver.setAuthorizer(newAuthorizer);
+
+        assertEq(receiver.authorizer(), newAuthorizer);
     }
 
     function test_setConfig_revertsForStranger() public {
@@ -58,6 +120,40 @@ contract GitHubFactReceiverTest is Test {
         assertEq(subId, 7);
         assertEq(gas, 300_000);
         assertEq(donId, bytes32("fun-base-sepolia-1"));
+    }
+
+    function test_requestFact_allowsZeroExternalIdAndUsesSecretsConfig() public {
+        vm.prank(owner);
+        receiver.setConfig({
+            subscriptionId: 11,
+            callbackGasLimit: 400_000,
+            donId: bytes32("fun-base-sepolia-2"),
+            secretsSlotId: 3,
+            secretsVersion: 9
+        });
+
+        bytes32 claimId = keccak256("claim/zero/fix");
+
+        vm.prank(authorizer);
+        bytes32 requestId = receiver.requestFact(claimId, "foo/bar", 0, 2);
+
+        assertEq(receiver.requestIdOf(claimId), requestId);
+        assertEq(receiver.claimIdOfRequest(requestId), claimId);
+
+        (uint64 subId, bytes memory data, uint16 dataVersion, uint32 gas, bytes32 donId) =
+            router.last();
+        assertEq(subId, 11);
+        assertGt(data.length, 0);
+        assertEq(dataVersion, 1);
+        assertEq(gas, 400_000);
+        assertEq(donId, bytes32("fun-base-sepolia-2"));
+    }
+
+    function test_getFact_emptyState() public view {
+        (bool ready, bytes memory blob) = receiver.getFact(keccak256("missing"));
+
+        assertFalse(ready);
+        assertEq(blob.length, 0);
     }
 
     function test_fulfill_storesFactAndEmits() public {
