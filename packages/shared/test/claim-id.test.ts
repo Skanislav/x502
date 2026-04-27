@@ -1,6 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { deriveClaimId, deriveCommitment, repoIdFromSlug } from "../src/claim-id.js";
-import { Kind } from "../src/types.js";
+import { Kind, KindName } from "../src/types.js";
+
+describe("Kind mappings", () => {
+  it("maps enum values to canonical wire names", () => {
+    expect(KindName[Kind.Report]).toBe("report");
+    expect(KindName[Kind.Triage]).toBe("triage");
+    expect(KindName[Kind.Fix]).toBe("fix");
+    expect(KindName[Kind.DocsTests]).toBe("docs_tests");
+  });
+});
+
+describe("repoIdFromSlug", () => {
+  it("uses github.com prefix and is case-sensitive", () => {
+    expect(repoIdFromSlug("x502-protocol/demo")).toBe(
+      "0x88864a76c02eb12528b373ff117dd41eb00f2030837d76a5af79da1fe3df6800",
+    );
+    expect(repoIdFromSlug("X502-protocol/demo")).not.toBe(repoIdFromSlug("x502-protocol/demo"));
+  });
+
+  it("does not normalize a github.com/ prefix supplied by the caller", () => {
+    expect(repoIdFromSlug("github.com/x502-protocol/demo")).not.toBe(
+      repoIdFromSlug("x502-protocol/demo"),
+    );
+  });
+});
 
 describe("deriveClaimId", () => {
   it("matches Solidity reference vector from forge trace", () => {
