@@ -33,7 +33,20 @@ describe("attestation typed data", () => {
     const att = { claimId, recipient: RECIPIENT, deadline: 123n, factHash: FACT_HASH };
     const td = attestationTypedData(84532, VAULT, att);
     const signature = await account.signTypedData(td);
-    const recovered = await recoverTypedDataAddress({ ...td, signature });
+    const recovered = await recoverTypedDataAddress({
+      domain: { name: "x502", version: "1", chainId: 84532, verifyingContract: VAULT },
+      types: {
+        Attestation: [
+          { name: "claimId", type: "bytes32" },
+          { name: "recipient", type: "address" },
+          { name: "deadline", type: "uint256" },
+          { name: "factHash", type: "bytes32" },
+        ],
+      },
+      primaryType: "Attestation",
+      message: att,
+      signature,
+    });
     expect(recovered.toLowerCase()).toBe(account.address.toLowerCase());
   });
 });
