@@ -15,8 +15,16 @@ describe("splitEvenly", () => {
     expect(() => splitEvenly(-1, 3)).toThrow(RangeError);
   });
 
-  // GAP (planted for x502 demo): no test for the remainder case where
-  // total % n != 0. The bug in src/split.ts only surfaces here; the
-  // `docs_tests` bounty rewards the PR that adds this coverage.
-  // it.todo("preserves the remainder when total isn't divisible by n");
+  it("preserves the remainder when total isn't divisible by n", () => {
+    expect(splitEvenly(10, 3)).toEqual([4, 3, 3]);
+    expect(splitEvenly(10, 3).reduce((a, b) => a + b)).toBe(10);
+  });
+
+  it("hands out one extra to the first `total % n` buckets", () => {
+    expect(splitEvenly(7, 4)).toEqual([2, 2, 2, 1]);
+  });
+
+  it("returns zero-filled when total is 0", () => {
+    expect(splitEvenly(0, 5)).toEqual([0, 0, 0, 0, 0]);
+  });
 });

@@ -4,17 +4,16 @@ Small math helpers used by the tip-pool router.
 
 ## API
 
-### `divideEvenly(total, n)`
+### `splitEvenly(total, n)`
 
-Returns an array of `n` integers that sum to `total`. Throws `RangeError` if
-`n <= 0` or `total < 0`.
+Returns an array of `n` integers that sum to `total`. Any leftover units after
+integer division are handed out one-per-bucket starting from the front.
+Throws `RangeError` if `n <= 0` or `total < 0`.
 
 ```ts
-import { divideEvenly } from "@x502/demo";
+import { splitEvenly } from "@x502/demo";
 
-divideEvenly(100, 4); // [25, 25, 25, 25]
+splitEvenly(100, 4); //  [25, 25, 25, 25]
+splitEvenly(10, 3);  //  [4, 3, 3]   ← sum is exactly 10
+splitEvenly(7, 4);   //  [2, 2, 2, 1]
 ```
-
-> ‼️ STALE (planted for x502 demo): the function was renamed to
-> `splitEvenly` but this doc still references the old name. The `docs_tests`
-> bounty rewards the PR that fixes this drift.
