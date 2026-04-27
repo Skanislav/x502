@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc -p .",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "extract-abis": "tsx scripts/extract-abis.ts"
   },
   "dependencies": {

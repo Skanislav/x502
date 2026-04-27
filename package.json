@@ -13,6 +13,9 @@
     "test": "pnpm test:contracts && pnpm test:ts",
     "test:contracts": "cd contracts && forge test",
     "test:ts": "pnpm --filter @x502/shared exec vitest run && pnpm --filter @x502/verifier-agent exec vitest run && pnpm --filter @x502/coordinator exec vitest run",
+    "test:coverage": "pnpm test:coverage:contracts && pnpm test:coverage:ts",
+    "test:coverage:contracts": "cd contracts && forge coverage --report summary",
+    "test:coverage:ts": "pnpm --filter @x502/shared run test:coverage && pnpm --filter @x502/verifier-agent run test:coverage && pnpm --filter @x502/coordinator run test:coverage",
     "lint": "pnpm lint:sol && pnpm lint:ts",
     "lint:sol": "cd contracts && forge fmt --check",
     "lint:ts": "biome check packages",
@@ -22,6 +25,7 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@types/node": "^22.7.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"
   }

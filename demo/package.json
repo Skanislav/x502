@@ -6,6 +6,7 @@
   "description": "Tiny standalone project used as the x502 demo subject. Has a planted bug, missing tests, and a stale doc — each one is bountied on the vault.",
   "scripts": {
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "derive-commitment": "tsx scripts/derive-commitment.ts"
   },
   "dependencies": {
