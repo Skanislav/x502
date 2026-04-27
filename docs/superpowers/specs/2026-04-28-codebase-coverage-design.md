@@ -160,9 +160,9 @@ Existing `splitEvenly` tests are present. Add or confirm coverage for:
 
 `chainlink/source.js` currently runs directly in the Chainlink Functions sandbox. To test it without a DON:
 
-- Extract pure decision logic into an exported CommonJS- or ESM-compatible helper, for example `chainlink/source-core.js`.
-- The extracted core must be pure JavaScript with no `ethers` dependency and no `https://esm.sh/...` imports so it can run under Node's Vitest. ABI encoding stays in the Deno DON wrapper.
-- Keep `chainlink/source.js` as a thin wrapper that reads `args`, calls GitHub through `Functions.makeHttpRequest`, imports `ethers` from `https://esm.sh/ethers@6.13.4`, performs ABI encoding, and delegates status/blob decisions to the helper.
+- Extract pure decision logic into an exported ESM helper, for example `chainlink/source-core.js`.
+- The extracted core must be pure JavaScript with no `ethers` dependency and no `https://esm.sh/...` imports so it can run under Node's Vitest.
+- Keep the uploaded `chainlink/source.js` self-contained because `Deploy.s.sol` reads it as inline Chainlink Functions source. Generate it from the pure core plus a small DON wrapper so the wrapper can import `ethers` from `https://esm.sh/ethers@6.13.4`, call GitHub through `Functions.makeHttpRequest`, perform ABI encoding, and reuse the tested decision logic without a runtime relative import.
 - Test report behavior for accepted labels, rejected labels, mixed string/object label forms, label mask bits, and wallet marker parsing.
 - Use `currentBehavior_ghAuthorBindingParsedButNotEnforced` for tests that pin parsing of `<!-- x502:0x... -->` without vault enforcement.
 - Test triage label count and `triage-done` mask.
