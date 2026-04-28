@@ -6,6 +6,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json-summary"],
       exclude: [...coverageConfigDefaults.exclude, "src/abis.ts", "scripts/**", "dist/**"],
+      // Ratcheted to measured shared runtime coverage; generated ABI and scripts stay excluded.
       thresholds: {
         statements: 100,
         branches: 100,

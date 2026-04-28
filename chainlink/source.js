@@ -3,10 +3,10 @@
 import { ethers } from "https://esm.sh/ethers@6.13.4";
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
-const ZERO_B32 = "0x" + "0".repeat(64);
+const ZERO_B32 = `0x${"0".repeat(64)}`;
 
 function labelsFromItem(item) {
-  return ((item && item.labels) || [])
+  return (item?.labels || [])
     .map((label) => (typeof label === "string" ? label : label.name))
     .filter(Boolean);
 }
@@ -33,7 +33,7 @@ function mergedBlockFromSha(sha) {
 }
 
 function decideFact({ kind, item, files = [] }) {
-  const body = (item && item.body) || "";
+  const body = item?.body || "";
   const fact = {
     status: 0,
     mergedBlock: 0n,

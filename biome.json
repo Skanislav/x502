@@ -16,7 +16,9 @@
       "**/.next",
       "**/coverage",
       "**/abis.ts",
-      "packages/web/app/globals.css"
+      "packages/web/app/globals.css",
+      "chainlink/source-wrapper.js",
+      "chainlink/source.js"
     ]
   },
   "organizeImports": {

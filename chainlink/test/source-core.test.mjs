@@ -20,9 +20,7 @@ describe("source core", () => {
   // the source parses the x502 wallet marker, but the vault never enforces it.
   it("currentBehavior_ghAuthorBindingParsedButNotEnforced", () => {
     expect(
-      authorBindingFromBody(
-        "claim <!-- x502:0x1234567890abcdef1234567890ABCDEF12345678 -->",
-      ),
+      authorBindingFromBody("claim <!-- x502:0x1234567890abcdef1234567890ABCDEF12345678 -->"),
     ).toBe("0x1234567890abcdef1234567890abcdef12345678");
     expect(authorBindingFromBody("no marker")).toBe(ZERO_ADDR);
   });
