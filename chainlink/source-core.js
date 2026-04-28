@@ -17,7 +17,9 @@ function wordFromUint(value) {
 }
 
 function wordFromBytes32(value) {
-  return value.replace(/^0x/, "").padStart(64, "0");
+  const clean = value.replace(/^0x/, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(clean)) throw Error("bytes32 must be 64 hex chars");
+  return clean;
 }
 
 function wordFromAddress(value) {
@@ -34,10 +36,11 @@ export function encodeFact(fact) {
 }
 
 export function hexToBytes(hex) {
-  const clean = hex.replace(/^0x/, "");
+  const clean = hex.replace(/^0x/, "").toLowerCase();
+  if (clean.length % 2 !== 0 || !/^[0-9a-f]*$/.test(clean)) throw Error("invalid hex");
   const out = new Uint8Array(clean.length / 2);
   for (let i = 0; i < out.length; i++) {
-    out[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+    out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
   }
   return out;
 }
