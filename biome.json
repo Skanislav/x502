@@ -16,8 +16,7 @@
       "**/.next",
       "**/coverage",
       "**/abis.ts",
-      "demo/**",
-      "packages/web/**"
+      "packages/web/app/globals.css"
     ]
   },
   "organizeImports": {

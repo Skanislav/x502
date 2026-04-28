@@ -21,8 +21,8 @@
     "test:coverage:chainlink": "vitest run --coverage --config chainlink/vitest.config.ts",
     "lint": "pnpm lint:sol && pnpm lint:ts",
     "lint:sol": "cd contracts && forge fmt --check",
-    "lint:ts": "biome check packages",
-    "fmt": "cd contracts && forge fmt && cd .. && biome check --write packages",
+    "lint:ts": "biome check packages demo",
+    "fmt": "cd contracts && forge fmt && cd .. && biome check --write packages demo",
     "typecheck": "pnpm -r exec tsc --noEmit"
   },
   "devDependencies": {

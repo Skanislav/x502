@@ -1,5 +1,5 @@
-import type { Hex } from "viem";
 import { deriveCommitment, repoIdFromSlug } from "@x502/shared";
+import type { Hex } from "viem";
 import type { PollResponse } from "./coordinator";
 
 export interface PipelineState {
@@ -24,7 +24,8 @@ export function previewCommitment(args: {
   saltReveal: string;
 }): Hex | undefined {
   if (!args.repoSlug.includes("/")) return undefined;
-  if (!args.externalId || !args.agentIdReveal || !args.saltReveal.startsWith("0x")) return undefined;
+  if (!args.externalId || !args.agentIdReveal || !args.saltReveal.startsWith("0x"))
+    return undefined;
   try {
     return deriveCommitment(
       BigInt(args.agentIdReveal),

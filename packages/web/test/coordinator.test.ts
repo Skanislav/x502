@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Hex } from "viem";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { CoordinatorClient, type PostClaimRequest } from "../lib/coordinator";
 
 describe("CoordinatorClient", () => {
@@ -29,7 +29,9 @@ describe("CoordinatorClient", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(new CoordinatorClient("https://coord.test").postClaim(request)).resolves.toEqual(response);
+    await expect(new CoordinatorClient("https://coord.test").postClaim(request)).resolves.toEqual(
+      response,
+    );
     expect(fetchMock).toHaveBeenCalledWith("https://coord.test/claim", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -38,7 +40,10 @@ describe("CoordinatorClient", () => {
   });
 
   test("postClaim throws the x402 error for 402 responses", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("payment required", { status: 402 })));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("payment required", { status: 402 })),
+    );
 
     await expect(
       new CoordinatorClient("https://coord.test").postClaim({

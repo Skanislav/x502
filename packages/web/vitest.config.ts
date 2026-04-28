@@ -14,6 +14,7 @@ export default defineConfig({
         ".next/**",
         "dist/**",
       ],
+      // Ratcheted to measured coverage for the intended lib runtime surface.
       thresholds: {
         statements: 100,
         branches: 100,

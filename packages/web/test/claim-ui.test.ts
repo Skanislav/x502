@@ -1,5 +1,5 @@
-import { describe, expect, test } from "vitest";
 import { deriveCommitment, repoIdFromSlug } from "@x502/shared";
+import { describe, expect, test } from "vitest";
 import { mapPoll, previewCommitment } from "../lib/claim-ui";
 
 const CLAIM_ID = `0x${"11".repeat(32)}` as const;
@@ -64,10 +64,22 @@ describe("previewCommitment", () => {
 
   test.each([
     ["invalid slug", { repoSlug: "repo", externalId: "2", agentIdReveal: "101", saltReveal: SALT }],
-    ["blank externalId", { repoSlug: "owner/repo", externalId: "", agentIdReveal: "101", saltReveal: SALT }],
-    ["non-bigint externalId", { repoSlug: "owner/repo", externalId: "abc", agentIdReveal: "101", saltReveal: SALT }],
-    ["non-bigint agentIdReveal", { repoSlug: "owner/repo", externalId: "2", agentIdReveal: "abc", saltReveal: SALT }],
-    ["non-0x salt", { repoSlug: "owner/repo", externalId: "2", agentIdReveal: "101", saltReveal: "beef" }],
+    [
+      "blank externalId",
+      { repoSlug: "owner/repo", externalId: "", agentIdReveal: "101", saltReveal: SALT },
+    ],
+    [
+      "non-bigint externalId",
+      { repoSlug: "owner/repo", externalId: "abc", agentIdReveal: "101", saltReveal: SALT },
+    ],
+    [
+      "non-bigint agentIdReveal",
+      { repoSlug: "owner/repo", externalId: "2", agentIdReveal: "abc", saltReveal: SALT },
+    ],
+    [
+      "non-0x salt",
+      { repoSlug: "owner/repo", externalId: "2", agentIdReveal: "101", saltReveal: "beef" },
+    ],
   ])("returns undefined for %s", (_name, args) => {
     expect(previewCommitment(args)).toBeUndefined();
   });

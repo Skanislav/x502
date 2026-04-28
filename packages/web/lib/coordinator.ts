@@ -1,5 +1,5 @@
-import type { Address, Hex } from "viem";
 import type { KindName } from "@x502/shared";
+import type { Address, Hex } from "viem";
 
 export interface PostClaimRequest {
   repoSlug: string;

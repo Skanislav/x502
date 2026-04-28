@@ -1,19 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { type Address, type Hex, isAddress } from "viem";
-import { type KindName } from "@x502/shared";
 import { type PipelineState, mapPoll, previewCommitment } from "@/lib/claim-ui";
 import { CoordinatorClient } from "@/lib/coordinator";
 import { basescanTx, formatUsdc, shortHash } from "@/lib/format";
+import type { KindName } from "@x502/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { type Address, type Hex, isAddress } from "viem";
 
-const DEFAULT_COORDINATOR =
-  process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "http://localhost:8787";
+const DEFAULT_COORDINATOR = process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "http://localhost:8787";
 
-const KIND_META: Record<
-  KindName,
-  { label: string; price: bigint; description: string }
-> = {
+const KIND_META: Record<KindName, { label: string; price: bigint; description: string }> = {
   report: {
     label: "report",
     price: 5_000_000n,
@@ -54,8 +50,7 @@ export default function Page() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const meta = KIND_META[kind];
-  const claimantAmount =
-    meta.price - OUTCOME_FEE_PER_VERIFIER * BigInt(VERIFIER_COUNT);
+  const claimantAmount = meta.price - OUTCOME_FEE_PER_VERIFIER * BigInt(VERIFIER_COUNT);
 
   const commitmentPreview = useMemo(
     () => previewCommitment({ repoSlug, externalId, agentIdReveal, saltReveal }),
@@ -122,16 +117,14 @@ export default function Page() {
           </span>
         </h1>
         <p className="text-sm text-muted leading-6">
-          File a claim against a vault-funded repo. The coordinator routes the
-          claim through Chainlink Functions (objective fact) and N-of-M verifier
-          agents (subjective judgment), then settles to your wallet on Base.
+          File a claim against a vault-funded repo. The coordinator routes the claim through
+          Chainlink Functions (objective fact) and N-of-M verifier agents (subjective judgment),
+          then settles to your wallet on Base.
         </p>
       </header>
 
       <section className="space-y-4">
-        <h2 className="text-xs uppercase tracking-widest text-muted">
-          Coordinator
-        </h2>
+        <h2 className="text-xs uppercase tracking-widest text-muted">Coordinator</h2>
         <input
           type="text"
           value={coordinatorUrl}
@@ -142,16 +135,10 @@ export default function Page() {
       </section>
 
       <section className="space-y-4">
-        <h2 className="text-xs uppercase tracking-widest text-muted">
-          File a claim
-        </h2>
+        <h2 className="text-xs uppercase tracking-widest text-muted">File a claim</h2>
 
         <Field label="Repo (owner/name)">
-          <input
-            value={repoSlug}
-            onChange={(e) => setRepoSlug(e.target.value)}
-            className="input"
-          />
+          <input value={repoSlug} onChange={(e) => setRepoSlug(e.target.value)} className="input" />
         </Field>
 
         <Field label="Issue or PR number">
@@ -182,13 +169,9 @@ export default function Page() {
                 >
                   <div className="flex items-baseline justify-between">
                     <span className="font-semibold">{m.label}</span>
-                    <span className="text-xs text-muted">
-                      {formatUsdc(m.price)}
-                    </span>
+                    <span className="text-xs text-muted">{formatUsdc(m.price)}</span>
                   </div>
-                  <div className="text-xs text-muted leading-5">
-                    {m.description}
-                  </div>
+                  <div className="text-xs text-muted leading-5">{m.description}</div>
                 </button>
               );
             })}
@@ -227,7 +210,7 @@ export default function Page() {
             <div className="text-xs text-muted">
               Must match the
               <code className="mx-1 px-1 bg-paper/5 rounded">
-                {`<!-- x502-commitment:0x... -->`}
+                {"<!-- x502-commitment:0x... -->"}
               </code>
               line in the GH issue/PR body.
             </div>
@@ -246,9 +229,7 @@ export default function Page() {
           </div>
           <div className="flex justify-between text-muted text-xs">
             <span>− verifier outcome fees ({VERIFIER_COUNT} × $0.10)</span>
-            <span>
-              −{formatUsdc(OUTCOME_FEE_PER_VERIFIER * BigInt(VERIFIER_COUNT))}
-            </span>
+            <span>−{formatUsdc(OUTCOME_FEE_PER_VERIFIER * BigInt(VERIFIER_COUNT))}</span>
           </div>
           <hr className="border-paper/10 my-1" />
           <div className="flex justify-between font-semibold">
@@ -269,23 +250,20 @@ export default function Page() {
 
       {pipeline.status !== "idle" && (
         <section className="space-y-3">
-          <h2 className="text-xs uppercase tracking-widest text-muted">
-            Status
-          </h2>
+          <h2 className="text-xs uppercase tracking-widest text-muted">Status</h2>
           <PipelineStatus state={pipeline} />
         </section>
       )}
 
       <footer className="text-xs text-muted pt-4 border-t border-paper/10 space-y-1">
         <div>
-          x402 = agents pay services. x502 = services pay agents. This is the
-          inverse: the vault pays out for verified outcomes, and verifier
-          compute is x402-paid by the coordinator from the anti-spam-fee
-          budget.
+          x402 = agents pay services. x502 = services pay agents. This is the inverse: the vault
+          pays out for verified outcomes, and verifier compute is x402-paid by the coordinator from
+          the anti-spam-fee budget.
         </div>
         <div>
-          Sources: Base Sepolia (chainId 84532) + ERC-8004 IdentityRegistry
-          0x8004A8… + Chainlink Functions Router 0xf9B8fc…
+          Sources: Base Sepolia (chainId 84532) + ERC-8004 IdentityRegistry 0x8004A8… + Chainlink
+          Functions Router 0xf9B8fc…
         </div>
       </footer>
 
@@ -315,6 +293,8 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
+    // Field renders the form control through children; Biome cannot infer that relationship.
+    // biome-ignore lint/a11y/noLabelWithoutControl: child inputs are nested inside this label.
     <label className="block space-y-1">
       <span className="text-xs text-muted">{label}</span>
       {children}
@@ -353,18 +333,9 @@ function PipelineStatus({ state }: { state: PipelineState }) {
 
   return (
     <div className="rounded border border-paper/10 p-4 space-y-2 text-sm">
-      <Step
-        label="Anti-spam fee paid"
-        done={state.status !== "idle"}
-      />
-      <Step
-        label="Chainlink Functions fact delivered"
-        done={state.factReady === true}
-      />
-      <Step
-        label={`Verifier signatures (${state.sigs ?? 0} / 2)`}
-        done={(state.sigs ?? 0) >= 2}
-      />
+      <Step label="Anti-spam fee paid" done={state.status !== "idle"} />
+      <Step label="Chainlink Functions fact delivered" done={state.factReady === true} />
+      <Step label={`Verifier signatures (${state.sigs ?? 0} / 2)`} done={(state.sigs ?? 0) >= 2} />
       <Step label="Vault payout tx" done={state.status === "paid"} />
     </div>
   );
@@ -374,10 +345,9 @@ function Step({ label, done }: { label: string; done: boolean }) {
   return (
     <div className="flex items-center gap-2">
       <span
-        className={[
-          "h-3 w-3 rounded-full",
-          done ? "bg-accent" : "bg-paper/20 animate-pulse",
-        ].join(" ")}
+        className={["h-3 w-3 rounded-full", done ? "bg-accent" : "bg-paper/20 animate-pulse"].join(
+          " ",
+        )}
       />
       <span className={done ? "text-paper" : "text-muted"}>{label}</span>
     </div>

@@ -13,6 +13,7 @@ export default defineConfig({
         // carries the assertable commitment behavior for coverage thresholds.
         "scripts/derive-commitment.ts",
       ],
+      // Ratcheted to measured coverage for included runtime helpers.
       thresholds: {
         statements: 90,
         branches: 90,

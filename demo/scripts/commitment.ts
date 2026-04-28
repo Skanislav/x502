@@ -12,7 +12,12 @@ export function deriveCommitmentOutput(args: CommitmentArgs): {
   commitment: `0x${string}`;
 } {
   const repoId = repoIdFromSlug(args.repo);
-  const commitment = deriveCommitment(BigInt(args.agentId), repoId, BigInt(args.externalId), args.salt);
+  const commitment = deriveCommitment(
+    BigInt(args.agentId),
+    repoId,
+    BigInt(args.externalId),
+    args.salt,
+  );
   return { repoId, commitment };
 }
 
