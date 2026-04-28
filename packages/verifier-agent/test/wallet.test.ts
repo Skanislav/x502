@@ -36,7 +36,7 @@ const typedData = {
 } as const;
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   cdpMocks.CdpClient.mockImplementation(() => ({
     evm: {
       getOrCreateAccount: cdpMocks.getOrCreateAccount,
@@ -48,11 +48,26 @@ beforeEach(() => {
 function mockEoaAccount(address: `0x${string}` = EOA_ADDRESS) {
   const requestFaucet = vi.fn().mockResolvedValue(undefined);
   const networkAccount = { requestFaucet };
+  const signMessage = vi.fn(function (this: { address: `0x${string}` }, parameters: unknown) {
+    expect(this.address).toBe(address);
+    expect(parameters).toBeDefined();
+    return Promise.resolve("0x0101");
+  });
+  const signTransaction = vi.fn(function (this: { address: `0x${string}` }, parameters: unknown) {
+    expect(this.address).toBe(address);
+    expect(parameters).toBeDefined();
+    return Promise.resolve("0x0202");
+  });
+  const signTypedData = vi.fn(function (this: { address: `0x${string}` }, parameters: unknown) {
+    expect(this.address).toBe(address);
+    expect(parameters).toBeDefined();
+    return Promise.resolve("0x0303");
+  });
   const account = {
     address,
-    signMessage: vi.fn().mockResolvedValue("0x01"),
-    signTransaction: vi.fn().mockResolvedValue("0x02"),
-    signTypedData: vi.fn().mockResolvedValue("0x03"),
+    signMessage,
+    signTransaction,
+    signTypedData,
     useNetwork: vi.fn().mockResolvedValue(networkAccount),
   };
 
@@ -112,6 +127,14 @@ describe("EnvKeyWalletProvider", () => {
 describe("CdpWalletProvider", () => {
   it("bootstraps an EOA wallet and requests testnet ETH when enabled", async () => {
     const { account, requestFaucet } = mockEoaAccount();
+    const messagePayload = { message: "hello agent" } as const;
+    const transactionPayload = {
+      to: "0x4444444444444444444444444444444444444444",
+      value: 1n,
+      chainId: foundry.id,
+      gas: 21_000n,
+      nonce: 0,
+    } as const;
     const provider = new CdpWalletProvider({
       accountName: "agent",
       mode: "eoa",
@@ -131,6 +154,12 @@ describe("CdpWalletProvider", () => {
     expect(wallet.address).toBe(EOA_ADDRESS);
     expect(wallet.account.address).toBe(EOA_ADDRESS);
     expect(wallet.agentId).toBe(101n);
+    await expect(wallet.account.signMessage(messagePayload)).resolves.toBe("0x0101");
+    expect(account.signMessage).toHaveBeenCalledWith(messagePayload);
+    await expect(wallet.account.signTransaction(transactionPayload)).resolves.toBe("0x0202");
+    expect(account.signTransaction).toHaveBeenCalledWith(transactionPayload);
+    await expect(wallet.account.signTypedData(typedData)).resolves.toBe("0x0303");
+    expect(account.signTypedData).toHaveBeenCalledWith(typedData);
   });
 
   it("bootstraps a smart wallet with scoped typed-data signing", async () => {
