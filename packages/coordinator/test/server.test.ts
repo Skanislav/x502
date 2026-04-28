@@ -192,6 +192,27 @@ describe("POST /claim — successful submission", () => {
     expect(j.status).toBe("verifying");
   });
 
+  it("accepts numeric externalId, numeric agentIdReveal, and saltReveal", async () => {
+    const coord = makeCoord({ factProvider: new NeverFactProvider() });
+    const saltReveal = `0x${"77".repeat(32)}` as Hex;
+
+    const r = await postClaim(coord, {
+      repoSlug: REPO_SLUG,
+      externalId: 43,
+      kind: "fix",
+      recipient: RECIPIENT,
+      agentIdReveal: 101,
+      saltReveal,
+    });
+
+    expect(r.status).toBe(200);
+    const j = (await r.json()) as { claimId: Hex };
+    const state = coord.claims.get(j.claimId);
+    expect(state?.request.externalId).toBe(43n);
+    expect(state?.request.agentIdReveal).toBe(101n);
+    expect(state?.request.saltReveal).toBe(saltReveal);
+  });
+
   it("dedups concurrent claims by claimId", async () => {
     const coord = makeCoord({ factProvider: new NeverFactProvider() });
     const body = {

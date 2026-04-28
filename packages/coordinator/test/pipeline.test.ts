@@ -172,6 +172,30 @@ describe("runClaimPipeline", () => {
     expect(vault.lastArgs?.attestations.map((a) => a.agentId)).toEqual([101n, 102n]);
   });
 
+  it("sorts accepted verifier attestations by agentId when responses arrive out of order", async () => {
+    const state = makeState();
+    const factProvider = new FixedFactProvider(FACT_BLOB);
+    const verifiers = [
+      new ScriptedVerifierClient(103n, "v3", { type: "accept", delayMs: 1 }),
+      new ScriptedVerifierClient(101n, "v1", { type: "accept", delayMs: 30 }),
+      new ScriptedVerifierClient(102n, "v2", { type: "accept", delayMs: 10 }),
+    ];
+    const vault = new ScriptedVault({ type: "ok" });
+
+    await runClaimPipeline(state, {
+      factProvider,
+      verifiers,
+      vault,
+      threshold: 3,
+      factTimeoutMs: 1_000,
+      verifierTimeoutMs: 1_000,
+    });
+
+    expect(state.status).toBe("paid");
+    expect(state.attestations.map((a) => a.agentId)).toEqual([101n, 102n, 103n]);
+    expect(vault.lastArgs?.attestations.map((a) => a.agentId)).toEqual([101n, 102n, 103n]);
+  });
+
   it("fails with insufficient signatures when only 1-of-3 accepts", async () => {
     const state = makeState();
     const factProvider = new FixedFactProvider(FACT_BLOB);
@@ -194,6 +218,59 @@ describe("runClaimPipeline", () => {
     expect(state.status).toBe("failed");
     expect(state.error).toContain("insufficient verifier signatures: 1/2");
     expect(state.error).toContain("stale");
+    expect(vault.lastArgs).toBeUndefined();
+  });
+
+  it("fails with rejection details when all verifiers reject", async () => {
+    const state = makeState();
+    const factProvider = new FixedFactProvider(FACT_BLOB);
+    const verifiers = [
+      new ScriptedVerifierClient(101n, "v1", { type: "reject", reason: "stale" }),
+      new ScriptedVerifierClient(102n, "v2", { type: "reject", reason: "untrusted" }),
+      new ScriptedVerifierClient(103n, "v3", { type: "reject", reason: "duplicate" }),
+    ];
+    const vault = new ScriptedVault({ type: "ok" });
+
+    await runClaimPipeline(state, {
+      factProvider,
+      verifiers,
+      vault,
+      threshold: 2,
+      factTimeoutMs: 1_000,
+      verifierTimeoutMs: 1_000,
+    });
+
+    expect(state.status).toBe("failed");
+    expect(state.error).toContain("insufficient verifier signatures: 0/2");
+    expect(state.error).toContain("stale");
+    expect(state.error).toContain("untrusted");
+    expect(state.error).toContain("duplicate");
+    expect(vault.lastArgs).toBeUndefined();
+  });
+
+  it("counts verifier timeouts in insufficient-signature error details", async () => {
+    const state = makeState();
+    const factProvider = new FixedFactProvider(FACT_BLOB);
+    const verifiers = [
+      new ScriptedVerifierClient(101n, "v1", { type: "accept" }),
+      new ScriptedVerifierClient(102n, "v2", { type: "timeout" }),
+      new ScriptedVerifierClient(103n, "v3", { type: "reject", reason: "untrusted" }),
+    ];
+    const vault = new ScriptedVault({ type: "ok" });
+
+    await runClaimPipeline(state, {
+      factProvider,
+      verifiers,
+      vault,
+      threshold: 2,
+      factTimeoutMs: 1_000,
+      verifierTimeoutMs: 50,
+    });
+
+    expect(state.status).toBe("failed");
+    expect(state.error).toContain("insufficient verifier signatures: 1/2");
+    expect(state.error).toContain("verifier timeout");
+    expect(state.error).toContain("untrusted");
     expect(vault.lastArgs).toBeUndefined();
   });
 
