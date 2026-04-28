@@ -3,9 +3,12 @@ import { describe, expect, it } from "vitest";
 import {
   authorBindingFromBody,
   decideFact,
+  encodeFact,
+  githubHeaders,
   mergedBlockFromSha,
   parseRepoSlug,
 } from "../source-core.js";
+import { readFileSync } from "node:fs";
 
 const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
 const b32 = (hex) => `0x${hex.padStart(64, "0")}`;
@@ -108,5 +111,37 @@ describe("source core", () => {
 
   it("throws for unknown kinds", () => {
     expect(() => decideFact({ kind: 9, item: {} })).toThrow("unknown kind 9");
+  });
+
+  it("ABI-encodes facts without relying on ethers in the DON runtime", () => {
+    expect(
+      encodeFact({
+        status: 1,
+        mergedBlock: 0xabcdef1234567890n,
+        labelMask: b32("5"),
+        ghAuthorBinding: "0x1234567890abcdef1234567890abcdef12345678",
+      }),
+    ).toBe(
+      "0x" +
+        [
+          "1".padStart(64, "0"),
+          "abcdef1234567890".padStart(64, "0"),
+          "5".padStart(64, "0"),
+          "1234567890abcdef1234567890abcdef12345678".padStart(64, "0"),
+        ].join(""),
+    );
+  });
+
+  it("builds a self-contained DON source without external ethers imports", () => {
+    const source = readFileSync(new URL("../source.js", import.meta.url), "utf8");
+
+    expect(source).not.toContain("https://esm.sh/ethers");
+    expect(source).not.toContain("ethers.");
+  });
+
+  it("omits GitHub authorization when no PAT secret is configured", () => {
+    expect(githubHeaders(undefined)).not.toHaveProperty("Authorization");
+    expect(githubHeaders("")).not.toHaveProperty("Authorization");
+    expect(githubHeaders("gh-test").Authorization).toBe("Bearer gh-test");
   });
 });
