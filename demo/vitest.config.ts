@@ -15,10 +15,10 @@ export default defineConfig({
       ],
       // Ratcheted to measured coverage for included runtime helpers.
       thresholds: {
-        statements: 90,
-        branches: 90,
+        statements: 100,
+        branches: 100,
         functions: 100,
-        lines: 90,
+        lines: 100,
       },
     },
   },

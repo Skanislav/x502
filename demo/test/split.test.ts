@@ -15,6 +15,11 @@ describe("splitEvenly", () => {
     expect(() => splitEvenly(-1, 3)).toThrow(RangeError);
   });
 
+  it("rejects non-integer inputs", () => {
+    expect(() => splitEvenly(10.5, 3)).toThrow(TypeError);
+    expect(() => splitEvenly(10, 3.5)).toThrow(TypeError);
+  });
+
   it("preserves the remainder when total isn't divisible by n", () => {
     expect(splitEvenly(10, 3)).toEqual([4, 3, 3]);
     expect(splitEvenly(10, 3).reduce((a, b) => a + b)).toBe(10);
@@ -26,5 +31,9 @@ describe("splitEvenly", () => {
 
   it("returns zero-filled when total is 0", () => {
     expect(splitEvenly(0, 5)).toEqual([0, 0, 0, 0, 0]);
+  });
+
+  it("keeps the sum when there are more buckets than units", () => {
+    expect(splitEvenly(2, 5)).toEqual([1, 1, 0, 0, 0]);
   });
 });
