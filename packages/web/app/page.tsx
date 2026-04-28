@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { type Address, type Hex, isAddress } from "viem";
-import { type KindName, deriveCommitment, repoIdFromSlug } from "@x502/shared";
-import { CoordinatorClient, type PollResponse } from "@/lib/coordinator";
+import { type KindName } from "@x502/shared";
+import { type PipelineState, mapPoll, previewCommitment } from "@/lib/claim-ui";
+import { CoordinatorClient } from "@/lib/coordinator";
 import { basescanTx, formatUsdc, shortHash } from "@/lib/format";
 
 const DEFAULT_COORDINATOR =
@@ -38,15 +39,6 @@ const KIND_META: Record<
 const OUTCOME_FEE_PER_VERIFIER = 100_000n; // $0.10
 const VERIFIER_COUNT = 2; // 2-of-3 demo
 
-interface PipelineState {
-  claimId?: Hex;
-  status: "idle" | "verifying" | "ready" | "paid" | "failed";
-  error?: string;
-  txHash?: Hex;
-  factReady?: boolean;
-  sigs?: number;
-}
-
 export default function Page() {
   const [coordinatorUrl, setCoordinatorUrl] = useState(DEFAULT_COORDINATOR);
   const [repoSlug, setRepoSlug] = useState("skanislav/x502");
@@ -65,21 +57,10 @@ export default function Page() {
   const claimantAmount =
     meta.price - OUTCOME_FEE_PER_VERIFIER * BigInt(VERIFIER_COUNT);
 
-  const previewCommitment = useMemo(() => {
-    if (!repoSlug.includes("/")) return undefined;
-    if (!externalId || !agentIdReveal || !saltReveal.startsWith("0x")) return undefined;
-    try {
-      const repoId = repoIdFromSlug(repoSlug);
-      return deriveCommitment(
-        BigInt(agentIdReveal),
-        repoId,
-        BigInt(externalId),
-        saltReveal as Hex,
-      );
-    } catch {
-      return undefined;
-    }
-  }, [repoSlug, externalId, agentIdReveal, saltReveal]);
+  const commitmentPreview = useMemo(
+    () => previewCommitment({ repoSlug, externalId, agentIdReveal, saltReveal }),
+    [repoSlug, externalId, agentIdReveal, saltReveal],
+  );
 
   useEffect(() => {
     return () => {
@@ -250,9 +231,9 @@ export default function Page() {
               </code>
               line in the GH issue/PR body.
             </div>
-            {previewCommitment && (
+            {commitmentPreview && (
               <div className="text-xs font-mono break-all bg-paper/5 rounded p-2">
-                {previewCommitment}
+                {commitmentPreview}
               </div>
             )}
           </div>
@@ -339,21 +320,6 @@ function Field({
       {children}
     </label>
   );
-}
-
-function mapPoll(claimId: Hex, body: PollResponse): PipelineState {
-  if (body.status === "paid") {
-    return { claimId, status: "paid", txHash: body.txHash };
-  }
-  if (body.status === "failed") {
-    return { claimId, status: "failed", error: body.error };
-  }
-  return {
-    claimId,
-    status: body.status,
-    factReady: body.factReady,
-    sigs: body.sigs,
-  };
 }
 
 function PipelineStatus({ state }: { state: PipelineState }) {
