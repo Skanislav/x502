@@ -1,6 +1,6 @@
 # Base Sepolia Deployment Progress - 2026-04-28
 
-Checkpoint captured at `2026-04-28 15:58:57 IST (+0530)`.
+Checkpoint captured at `2026-04-28 18:29:50 IST (+0530)`.
 
 ## Network
 
@@ -28,10 +28,10 @@ Checkpoint captured at `2026-04-28 15:58:57 IST (+0530)`.
   - DON ID: `fun-base-sepolia-1`
   - secrets slot ID: `0`
   - secrets version: `0`
-- Chainlink consumer state for receiver on subscription `216`: `(true, 1, 1)`
+- Chainlink consumer state for receiver on subscription `216`: `(true, 2, 2)`
   - consumer is allowed
-  - one request initiated
-  - one request completed
+  - two requests initiated
+  - two requests completed
 - ERC-8004 agent ID: `5260`
   - owner: `0x980abF154694Fe3Fea424eD095B04C6365E92F9b`
   - agent wallet: `0x980abF154694Fe3Fea424eD095B04C6365E92F9b`
@@ -45,11 +45,11 @@ Checkpoint captured at `2026-04-28 15:58:57 IST (+0530)`.
     - fix: `10000000` (`10 USDC`)
     - docsTests: `8000000` (`8 USDC`)
   - verifier outcome fee: `100000` (`0.10 USDC`)
-  - internal repo balance: `15000000` (`15 USDC`)
+  - internal repo balance: `10000000` (`10 USDC`)
 - Token balances:
-  - deployer: `5000000` (`5 USDC`)
-  - vault token balance: `15000000` (`15 USDC`)
-  - vault internal repo balance: `15000000` (`15 USDC`)
+  - deployer: `10000000` (`10 USDC`)
+  - vault token balance: `10000000` (`10 USDC`)
+  - vault internal repo balance: `10000000` (`10 USDC`)
 
 ## Environment Updates
 
@@ -87,6 +87,10 @@ All status values below were checked with `cast receipt` against Base Sepolia. `
 | Reconfigure repo to trust `5260` | `0x1dda28f5acfeb45e9d3523529609182537f61c35dfe6f0a44e2cfce73043d6c1` | `0x26e95f3` | `0x1` | `0xc672` | Current trusted agent list is `[5260]` |
 | Request Chainlink fact for issue `#2` | `0xcff0ec798d6e87a90b9741d4339c46a60f0e290aa92db48410ffb13beba364ae` | `0x26e961a` | `0x1` | `0xb9cec` | Request ID `0x37f2c31e80d0358cee7105ac83742749318cc484f81d0900561b5e3f57fb16fa` |
 | Chainlink fulfillment callback | `0x0119459180388aafc8a879760947880d31a6cc7f5359c480397d8f924037acd5` | `0x26e961e` | `0x1` | `0x35df8` | Fulfilled with error, no fact stored |
+| Upload reduced Chainlink source | `0x0bdd3d624bd6c75ebf038754bb71e82f6a86f90070cae5b8dbe650778d55a7d1` | `0x26ea79e` | `0x1` | `0x12c9cd` | Replaced generated source with runtime-safe ABI encoding and no external `ethers` import |
+| Retry Chainlink fact for issue `#2` | `0x572d876e9b8ce00563d192744501939ffe46abaecb6042d84d0d75b95037c018` | `0x26ea7b0` | `0x1` | `0xc4f8e` | Request ID `0xe4ba44e335732f3b447207c5cc64919cbc9855b77dcfe22ae79b0a8c0ca1793f` |
+| Chainlink fulfillment callback retry | `0xf64f27051fda5bc2c5614e2c4ae2492371d322ea67069bf0ab7d18eebe3683e8` | `0x26ea7b7` | `0x1` | `0x4355e` | Stored the encoded fact on-chain |
+| Vault payout for issue `#2` | `0xfa979fd4800095edb151724bde69418882caa4c20a2f60191a109c257118e27a` | `0x26ea7df` | `0x1` | `0x22853` | Paid `4.9 USDC` claimant amount plus `0.1 USDC` verifier fee |
 
 ## Current Smoke Claim
 
@@ -94,18 +98,30 @@ All status values below were checked with `cast receipt` against Base Sepolia. `
 - GitHub external ID: issue `#2`
 - Kind: `report` (`0`)
 - Claim ID: `0x132167063b9157ad05743480c326f1fe594001c9ae119d3460af0e9d55153847`
-- Chainlink request ID: `0x37f2c31e80d0358cee7105ac83742749318cc484f81d0900561b5e3f57fb16fa`
-- `requestIdOf(claimId)`: `0x37f2c31e80d0358cee7105ac83742749318cc484f81d0900561b5e3f57fb16fa`
-- `getFact(claimId)`: `false, 0x`
-- `isPaid(claimId)`: `false`
+- Latest Chainlink request ID: `0xe4ba44e335732f3b447207c5cc64919cbc9855b77dcfe22ae79b0a8c0ca1793f`
+- `requestIdOf(claimId)`: `0xe4ba44e335732f3b447207c5cc64919cbc9855b77dcfe22ae79b0a8c0ca1793f`
+- `getFact(claimId)`: `true`
+- Fact blob:
 
-The Chainlink fulfillment emitted `FactFulfilled` with an empty `factBlob` and this error:
+```text
+0x0000000000000000000000000000000000000000000000000000000000000000
+  0000000000000000000000000000000000000000000000000000000000000000
+  0000000000000000000000000000000000000000000000000000000000000000
+  0000000000000000000000000000000000000000000000000000000000000000
+```
+
+- Fact hash used for payout: `0x012893657d8eb2efad4de0a91bcd0e39ad9837745dec3ea923737ea803fc8e3d`
+- `isPaid(claimId)`: `true`
+
+The first Chainlink fulfillment emitted `FactFulfilled` with an empty `factBlob` and this error:
 
 ```text
 Exec Error: syntax error, RAM exceeded, or other error
 ```
 
-That means the request reached Chainlink and called back on-chain, but the Functions JavaScript did not successfully produce the encoded fact. No payout was attempted.
+The source was then reduced to avoid importing `ethers` from `esm.sh` inside the Chainlink Functions runtime, and the GitHub `Authorization` header is now only included when a DON-hosted `GITHUB_PAT` secret exists. The retry fulfilled successfully and the payout transaction settled.
+
+Important caveat: issue `#2` did not have accepted/bug/enhancement labels when tested, so the encoded fact has zero-valued fields. This smoke test proves the Base Sepolia settlement path from Chainlink fact to verifier signature to vault payout. The current vault gates on the fact hash and does not interpret the fact status field.
 
 ## Local Runtime State
 
@@ -119,6 +135,11 @@ That means the request reached Chainlink and called back on-chain, but the Funct
 ## Local Repo State
 
 - Modified:
+  - `chainlink/build-source.mjs`
+  - `chainlink/source-core.js`
+  - `chainlink/source-wrapper.js`
+  - `chainlink/source.js`
+  - `chainlink/test/source-core.test.mjs`
   - `contracts/foundry.toml`
     - Added read permission for `../chainlink/source.js`, required by the deploy script.
 - Untracked:
@@ -127,12 +148,18 @@ That means the request reached Chainlink and called back on-chain, but the Funct
 - Ignored but updated:
   - `.env`
 
+## Local Verification
+
+- `pnpm test:chainlink`: 11 tests passed.
+- `pnpm test`: 187 tests passed, 1 fork test skipped.
+- `GET http://localhost:9000/health` returned:
+
+```json
+{"ok":true,"agentId":"5260","address":"0x980abF154694Fe3Fea424eD095B04C6365E92F9b","vault":"0x8b414bde9F7EA00f58aD143937a31Ae7b8D0c338","chainId":84532}
+```
+
 ## Next Steps
 
-1. Fix or reduce the Chainlink Functions JavaScript source so it runs within the DON runtime.
-   - Current error is `Exec Error: syntax error, RAM exceeded, or other error`.
-   - Likely area to inspect: `chainlink/source.js` and the generated bundle size/imports.
-2. Rebuild `chainlink/source.js` if source files change.
-3. Call `GitHubFactReceiver.setSource(...)` again via the deployer after rebuilding.
-4. Retry `requestFact` for the same claim ID or a new test claim.
-5. Once `getFact(claimId)` returns `true`, obtain the verifier signature and call `BountyVault.payout`.
+1. Commit the Chainlink source fix and tests separately from this deployment note.
+2. Add a semantic fact-status check to the vault or settlement flow if zero-status facts should not be payable.
+3. Run another smoke claim against a GitHub issue with the expected accepted label set.
