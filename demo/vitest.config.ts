@@ -6,12 +6,18 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
-      exclude: [...coverageConfigDefaults.exclude, "fix/**"],
+      exclude: [
+        ...coverageConfigDefaults.exclude,
+        "fix/**",
+        // Subprocess smoke tests cover the thin CLI wrapper; scripts/commitment.ts
+        // carries the assertable commitment behavior for coverage thresholds.
+        "scripts/derive-commitment.ts",
+      ],
       thresholds: {
-        statements: 48,
-        branches: 83,
-        functions: 75,
-        lines: 48,
+        statements: 90,
+        branches: 90,
+        functions: 100,
+        lines: 90,
       },
     },
   },

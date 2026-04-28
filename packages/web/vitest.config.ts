@@ -6,6 +6,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
+      include: ["lib/**/*.ts"],
       exclude: [
         ...coverageConfigDefaults.exclude,
         "app/page.tsx",
@@ -14,10 +15,10 @@ export default defineConfig({
         "dist/**",
       ],
       thresholds: {
-        statements: 57,
-        branches: 92,
-        functions: 81,
-        lines: 57,
+        statements: 100,
+        branches: 100,
+        functions: 100,
+        lines: 100,
       },
     },
   },
