@@ -48,6 +48,15 @@ describe("source core", () => {
     ).toBe(0);
   });
 
+  it("returns an unverified default fact when item is missing", () => {
+    expect(decideFact({ kind: 0, item: undefined })).toEqual({
+      status: 0,
+      mergedBlock: 0n,
+      labelMask: b32("0"),
+      ghAuthorBinding: ZERO_ADDR,
+    });
+  });
+
   it("requires at least two triage labels and sets triage-done mask", () => {
     expect(
       decideFact({

@@ -6,7 +6,7 @@ const ZERO_ADDR = "0x0000000000000000000000000000000000000000";
 const ZERO_B32 = "0x" + "0".repeat(64);
 
 function labelsFromItem(item) {
-  return (item.labels ?? [])
+  return ((item && item.labels) || [])
     .map((label) => (typeof label === "string" ? label : label.name))
     .filter(Boolean);
 }
@@ -33,7 +33,7 @@ function mergedBlockFromSha(sha) {
 }
 
 function decideFact({ kind, item, files = [] }) {
-  const body = item.body ?? "";
+  const body = (item && item.body) || "";
   const fact = {
     status: 0,
     mergedBlock: 0n,
@@ -71,7 +71,7 @@ function decideFact({ kind, item, files = [] }) {
   }
 
   if (kind === 2) {
-    if (item.merged === true && /(?:fixes|closes|resolves)\s+#\d+/i.test(body)) {
+    if (item && item.merged === true && /(?:fixes|closes|resolves)\s+#\d+/i.test(body)) {
       fact.status = 1;
       fact.mergedBlock = mergedBlockFromSha(item.merge_commit_sha);
     }
@@ -79,7 +79,7 @@ function decideFact({ kind, item, files = [] }) {
   }
 
   if (kind === 3) {
-    if (item.merged === true) {
+    if (item && item.merged === true) {
       const testRe = /(^|\/)(test|tests|spec|__tests__)\//i;
       const docRe = /(^|\/)(docs|readme)/i;
       const hasTest = files.some((file) => testRe.test(file.filename ?? ""));
