@@ -100,6 +100,12 @@ describe("source core", () => {
       b32("2"),
     );
     expect(decideFact({ kind: 3, item, files: [{ filename: "src/source.ts" }] }).status).toBe(0);
+    expect(decideFact({ kind: 3, item: undefined })).toEqual({
+      status: 0,
+      mergedBlock: 0n,
+      labelMask: b32("0"),
+      ghAuthorBinding: ZERO_ADDR,
+    });
   });
 
   it("throws for unknown kinds", () => {

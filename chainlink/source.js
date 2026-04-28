@@ -124,7 +124,7 @@ const r = await Functions.makeHttpRequest({
 if (r.error) throw Error(`gh ${endpoint}/${externalId} fetch failed: ${r.error}`);
 
 let files = [];
-if (kind === 3 && r.data.merged === true) {
+if (kind === 3 && r.data && r.data.merged === true) {
   const fr = await Functions.makeHttpRequest({
     url: `https://api.github.com/repos/${owner}/${repo}/pulls/${externalId}/files`,
     headers,
