@@ -1,7 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
 import type { Account, Address, Hex } from "viem";
+import { describe, expect, it, vi } from "vitest";
 
-import { Kind, repoIdFromSlug, type SignedAttestation } from "@x502/shared";
+import { Kind, type SignedAttestation, repoIdFromSlug } from "@x502/shared";
 
 import { FetchVerifierClient } from "../src/adapters/fetch-verifier.js";
 import { StaticRepoRegistry } from "../src/adapters/repo-registry.js";
@@ -11,7 +11,7 @@ import { ViemVaultWriter } from "../src/adapters/viem-vault.js";
 const REPO_SLUG = "x502-protocol/demo";
 const REPO_ID = repoIdFromSlug(REPO_SLUG);
 const RECIPIENT = "0x24582544C98a86eE59687c4D5B55D78f4FffA666" as Address;
-const ACCOUNT = { address: "0x1111111111111111111111111111111111111111" } as Account;
+const ACCOUNT = { address: "0x1111111111111111111111111111111111111111" } as unknown as Account;
 const VAULT = "0x2222222222222222222222222222222222222222" as Address;
 const PROVIDER = "0x3333333333333333333333333333333333333333" as Address;
 const CLAIM_ID = `0x${"44".repeat(32)}` as Hex;
@@ -120,7 +120,8 @@ describe("FetchVerifierClient", () => {
       factHash: FACT_HASH,
     });
 
-    const body = JSON.parse(fetchImpl.mock.calls[0]![1]!.body as string) as Record<string, unknown>;
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    const body = JSON.parse(init.body as string) as Record<string, unknown>;
     expect(body).not.toHaveProperty("agentIdReveal");
     expect(body).not.toHaveProperty("saltReveal");
   });
@@ -232,7 +233,7 @@ describe("ViemVaultWriter", () => {
   function makeWriter(opts?: { simulateReject?: Error; writeReject?: Error }) {
     const request = { sentinel: "vault-payout-request" };
     const publicClient = {
-      simulateContract: vi.fn(async (args: unknown) => {
+      simulateContract: vi.fn(async (_args: unknown) => {
         if (opts?.simulateReject) throw opts.simulateReject;
         return { request };
       }),
@@ -248,12 +249,7 @@ describe("ViemVaultWriter", () => {
       publicClient,
       request,
       wallet,
-      writer: new ViemVaultWriter(
-        publicClient as never,
-        wallet as never,
-        ACCOUNT,
-        VAULT,
-      ),
+      writer: new ViemVaultWriter(publicClient as never, wallet as never, ACCOUNT, VAULT),
     };
   }
 

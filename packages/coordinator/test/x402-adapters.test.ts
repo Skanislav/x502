@@ -1,9 +1,11 @@
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Account, Address, WalletClient } from "viem";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("x402-fetch", () => ({ wrapFetchWithPayment: vi.fn((f) => f) }));
-vi.mock("x402-hono", () => ({ paymentMiddleware: vi.fn(() => async (_c, next) => next()) }));
+vi.mock("x402-hono", () => ({
+  paymentMiddleware: vi.fn(() => async (_c: unknown, next: () => Promise<void> | void) => next()),
+}));
 
 import { wrapFetchWithPayment } from "x402-fetch";
 import { paymentMiddleware } from "x402-hono";
@@ -19,7 +21,7 @@ describe("buildX402Fetch", () => {
   it("delegates to wrapFetchWithPayment with global fetch and wallet client", () => {
     const walletClient = {
       account: { address: "0x1111111111111111111111111111111111111111" },
-    } as WalletClient & { account: Account };
+    } as unknown as WalletClient & { account: Account };
 
     const wrapped = buildX402Fetch(walletClient);
 

@@ -1,13 +1,13 @@
-import { describe, expect, it } from "vitest";
 import { recoverTypedDataAddress } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { describe, expect, it } from "vitest";
 import {
   ATTESTATION_TYPES,
+  Kind,
   attestationDomain,
   attestationTypedData,
   deriveClaimId,
   repoIdFromSlug,
-  Kind,
 } from "../src/index.js";
 
 const VAULT = "0x1111111111111111111111111111111111111111" as const;

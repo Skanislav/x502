@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
+import type { Hex } from "viem";
 import { CoordinatorClient, type PostClaimRequest } from "../lib/coordinator";
 
 describe("CoordinatorClient", () => {
@@ -67,7 +68,7 @@ describe("CoordinatorClient", () => {
   test("poll returns status and body from the payout endpoint", async () => {
     const body = {
       status: "ready",
-      claimId: `0x${"33".repeat(32)}`,
+      claimId: `0x${"33".repeat(32)}` as Hex,
       factReady: true,
       sigs: 2,
     };

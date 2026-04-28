@@ -5,12 +5,13 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],
-      exclude: [
-        ...coverageConfigDefaults.exclude,
-        "src/abis.ts",
-        "scripts/**",
-        "dist/**",
-      ],
+      exclude: [...coverageConfigDefaults.exclude, "src/abis.ts", "scripts/**", "dist/**"],
+      thresholds: {
+        statements: 100,
+        branches: 100,
+        functions: 100,
+        lines: 100,
+      },
     },
   },
 });
