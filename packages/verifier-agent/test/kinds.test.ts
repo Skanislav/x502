@@ -207,7 +207,13 @@ describe("POST /verify — commitment binding", () => {
 
 describe("POST /verify — bad input", () => {
   it("404s on unknown repoId", async () => {
-    const { app } = makeApp(new AcceptAllPolicy());
+    const account = privateKeyToAccount(generatePrivateKey());
+    const wallet = createWalletClient({ account, chain: foundry, transport: http() });
+    const app = buildVerifierApp({
+      signer: { agentId: 100n, vault: VAULT, chainId: foundry.id, account, wallet },
+      policy: new AcceptAllPolicy(),
+      repoSlugResolver: () => undefined,
+    });
     const r = await postVerify(app, {
       repoId: `0x${"ee".repeat(32)}`,
       externalId: "1",
@@ -216,11 +222,7 @@ describe("POST /verify — bad input", () => {
       deadline: "9999999999",
       factHash: `0x${"cd".repeat(32)}`,
     });
-    // makeApp's repoSlugResolver always returns REPO_SLUG, so unknown IDs are
-    // accepted for now — but if you swap in StaticRepoRegistry-backed
-    // resolution, the agent must 404. This test pins the current behaviour
-    // and will need updating when that gets tightened.
-    expect([200, 404]).toContain(r.status);
+    expect(r.status).toBe(404);
   });
 
   it("400s on bad factHash length", async () => {

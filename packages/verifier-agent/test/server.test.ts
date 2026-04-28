@@ -44,6 +44,36 @@ describe("verifier-agent /verify", () => {
     expect(res.status).toBe(400);
   });
 
+  it.each([
+    ["repoId", { repoId: "0xab" }, /bad repoId/],
+    ["externalId", { externalId: null }, /bad externalId/],
+    ["kind", { kind: 99 }, /bad kind/],
+    ["recipient", { recipient: "0x1234" }, /bad recipient/],
+    ["deadline", { deadline: null }, /bad deadline/],
+    ["factHash", { factHash: "0xab" }, /bad factHash/],
+  ])("returns 400 on bad %s", async (_name, patch, errorPattern) => {
+    const { app } = makeApp({ policy: "accept" });
+    const repoId = repoIdFromSlug("x502-protocol/demo");
+    const body = {
+      repoId,
+      externalId: "42",
+      kind: Kind.Fix,
+      recipient: zeroAddress,
+      deadline: "1000",
+      factHash: `0x${"ab".repeat(32)}`,
+      ...patch,
+    };
+    const res = await app.request("/verify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: expect.stringMatching(errorPattern),
+    });
+  });
+
   it("returns 403 when policy rejects", async () => {
     const { app } = makeApp({ policy: "reject" });
     const repoId = repoIdFromSlug("x502-protocol/demo");
