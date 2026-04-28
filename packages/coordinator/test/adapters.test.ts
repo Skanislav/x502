@@ -230,11 +230,11 @@ describe("ViemVaultWriter", () => {
   ];
 
   function makeWriter(opts?: { simulateReject?: Error; writeReject?: Error }) {
-    const request = { address: VAULT, functionName: "payout", args: ["simulated"] };
+    const request = { sentinel: "vault-payout-request" };
     const publicClient = {
       simulateContract: vi.fn(async (args: unknown) => {
         if (opts?.simulateReject) throw opts.simulateReject;
-        return { request: { ...request, args } };
+        return { request };
       }),
       waitForTransactionReceipt: vi.fn(async () => ({ status: "success" })),
     };
@@ -246,6 +246,7 @@ describe("ViemVaultWriter", () => {
     };
     return {
       publicClient,
+      request,
       wallet,
       writer: new ViemVaultWriter(
         publicClient as never,
@@ -257,7 +258,7 @@ describe("ViemVaultWriter", () => {
   }
 
   it("simulates, writes, waits for receipt, and returns the tx hash", async () => {
-    const { publicClient, wallet, writer } = makeWriter();
+    const { publicClient, request, wallet, writer } = makeWriter();
 
     await expect(
       writer.submitPayout({
@@ -288,7 +289,14 @@ describe("ViemVaultWriter", () => {
       ],
     });
     expect(wallet.writeContract).toHaveBeenCalledTimes(1);
+    expect(wallet.writeContract).toHaveBeenCalledWith(request);
     expect(publicClient.waitForTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH });
+    expect(publicClient.simulateContract.mock.invocationCallOrder[0]!).toBeLessThan(
+      wallet.writeContract.mock.invocationCallOrder[0]!,
+    );
+    expect(wallet.writeContract.mock.invocationCallOrder[0]!).toBeLessThan(
+      publicClient.waitForTransactionReceipt.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("propagates simulation failures without writing", async () => {
@@ -333,12 +341,13 @@ describe("ViemFactProvider", () => {
   function makeProvider(readResult: [boolean, Hex] = [false, FACT_BLOB]) {
     let onLogs: ((logs: Array<{ args: { claimId?: Hex; factBlob?: Hex } }>) => void) | undefined;
     const unwatch = vi.fn();
+    const request = { sentinel: "fact-request" };
     const publicClient = {
       watchContractEvent: vi.fn((args: { onLogs: typeof onLogs }) => {
         onLogs = args.onLogs;
         return unwatch;
       }),
-      simulateContract: vi.fn(async (args: unknown) => ({ request: { args } })),
+      simulateContract: vi.fn(async () => ({ request })),
       waitForTransactionReceipt: vi.fn(async () => ({ status: "success" })),
       readContract: vi.fn(async () => readResult),
     };
@@ -354,6 +363,7 @@ describe("ViemFactProvider", () => {
     return {
       provider,
       publicClient,
+      request,
       wallet,
       unwatch,
       emit: (logs: Array<{ args: { claimId?: Hex; factBlob?: Hex } }>) => onLogs?.(logs),
@@ -375,7 +385,7 @@ describe("ViemFactProvider", () => {
   });
 
   it("requests facts with the expected contract arguments", async () => {
-    const { provider, publicClient, wallet } = makeProvider();
+    const { provider, publicClient, request, wallet } = makeProvider();
 
     await provider.requestFact(CLAIM_ID, REPO_SLUG, 42n, Kind.Fix);
 
@@ -389,7 +399,14 @@ describe("ViemFactProvider", () => {
       }),
     );
     expect(wallet.writeContract).toHaveBeenCalledTimes(1);
+    expect(wallet.writeContract).toHaveBeenCalledWith(request);
     expect(publicClient.waitForTransactionReceipt).toHaveBeenCalledWith({ hash: TX_HASH });
+    expect(publicClient.simulateContract.mock.invocationCallOrder[0]!).toBeLessThan(
+      wallet.writeContract.mock.invocationCallOrder[0]!,
+    );
+    expect(wallet.writeContract.mock.invocationCallOrder[0]!).toBeLessThan(
+      publicClient.waitForTransactionReceipt.mock.invocationCallOrder[0]!,
+    );
   });
 
   it("resolves pending facts from matching events", async () => {

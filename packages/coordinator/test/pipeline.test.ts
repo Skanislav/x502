@@ -4,7 +4,7 @@
 /// can't cover cheaply (timeouts, reverts, partial verifier accepts).
 
 import type { Address, Hex } from "viem";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Kind, type SignedAttestation, deriveClaimId, repoIdFromSlug } from "@x502/shared";
 
@@ -146,6 +146,33 @@ describe("runClaimPipeline", () => {
     expect(vault.lastArgs?.attestations).toHaveLength(2);
     // Sorted by agentId for reproducibility
     expect(vault.lastArgs?.attestations.map((a) => a.agentId)).toEqual([101n, 102n]);
+  });
+
+  it("clears verifier timeout timers after fast successful verification", async () => {
+    vi.useFakeTimers();
+    try {
+      const state = makeState();
+      const factProvider = new FixedFactProvider(FACT_BLOB);
+      const verifiers = [
+        new ScriptedVerifierClient(101n, "v1", { type: "accept" }),
+        new ScriptedVerifierClient(102n, "v2", { type: "accept" }),
+      ];
+      const vault = new ScriptedVault({ type: "ok" });
+
+      await runClaimPipeline(state, {
+        factProvider,
+        verifiers,
+        vault,
+        threshold: 2,
+        factTimeoutMs: 1_000,
+        verifierTimeoutMs: 1_000,
+      });
+
+      expect(state.status).toBe("paid");
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("trims to exactly `threshold` even when more verifiers accept", async () => {

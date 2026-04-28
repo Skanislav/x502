@@ -38,6 +38,7 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
   //    (We could fan-out earlier with a guess, but the signed factHash binds
   //    the agent to the exact onchain fact — no race.)
   const verifyPromises = deps.verifiers.map(async (v) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const r = await Promise.race([
         v.verify({
@@ -50,13 +51,15 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
           agentIdReveal: request.agentIdReveal,
           saltReveal: request.saltReveal,
         }),
-        new Promise<{ rejected: string }>((_, rej) =>
-          setTimeout(() => rej(new Error("verifier timeout")), deps.verifierTimeoutMs),
-        ),
+        new Promise<{ rejected: string }>((_, rej) => {
+          timeout = setTimeout(() => rej(new Error("verifier timeout")), deps.verifierTimeoutMs);
+        }),
       ]);
       return r;
     } catch (e) {
       return { rejected: (e as Error).message };
+    } finally {
+      if (timeout) clearTimeout(timeout);
     }
   });
 
