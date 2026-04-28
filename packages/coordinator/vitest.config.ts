@@ -8,6 +8,7 @@ export default defineConfig({
       provider: "v8",
       reporter: ["text", "json-summary"],
       exclude: [...coverageConfigDefaults.exclude, "src/main.ts", "dist/**"],
+      // Ratcheted to measured coverage for included runtime modules.
       thresholds: {
         statements: 98,
         branches: 94,

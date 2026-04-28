@@ -8,6 +8,7 @@ export default defineConfig({
       reporter: ["text", "json-summary"],
       include: ["chainlink/source-core.js"],
       exclude: [...coverageConfigDefaults.exclude, "chainlink/source.js"],
+      // Ratcheted to measured coverage for the included runtime decision core.
       thresholds: {
         statements: 100,
         branches: 92,
