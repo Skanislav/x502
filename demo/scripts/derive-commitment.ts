@@ -10,7 +10,7 @@
 //     --salt 0x0000...0001
 
 import { parseArgs } from "node:util";
-import { deriveCommitment, repoIdFromSlug } from "@x502/shared";
+import { formatCommitmentOutput } from "./commitment.js";
 
 const { values } = parseArgs({
   options: {
@@ -28,16 +28,11 @@ if (!values["agent-id"] || !values.repo || !values["external-id"] || !values.sal
   process.exit(1);
 }
 
-const repoId = repoIdFromSlug(values.repo);
-const commitment = deriveCommitment(
-  BigInt(values["agent-id"]),
-  repoId,
-  BigInt(values["external-id"]),
-  values.salt as `0x${string}`,
+console.log(
+  formatCommitmentOutput({
+    agentId: values["agent-id"],
+    repo: values.repo,
+    externalId: values["external-id"],
+    salt: values.salt as `0x${string}`,
+  }),
 );
-
-console.log(`repoId     : ${repoId}`);
-console.log(`commitment : ${commitment}`);
-console.log("");
-console.log("Paste this into your GitHub issue/PR body:");
-console.log(`<!-- x502-commitment:${commitment} -->`);
