@@ -1003,12 +1003,12 @@ it("bootstraps a smart wallet and forwards signTypedData to the network scope", 
 Extend `pickWalletProviderFromEnv` tests for:
 
 ```ts
-it("maps CDP_NETWORK and faucet flag", () => {
+it("maps VERIFIER_NETWORK and faucet flag", () => {
   const provider = pickWalletProviderFromEnv({
     WALLET_PROVIDER: "cdp",
     CDP_WALLET_MODE: "smart",
-    CDP_NETWORK: "base",
-    CDP_FAUCET: "true",
+    VERIFIER_NETWORK: "base",
+    CDP_REQUEST_FAUCET: "true",
     CDP_API_KEY_ID: "fake",
     CDP_API_KEY_SECRET: "fake",
     CDP_WALLET_SECRET: "fake",
@@ -1016,14 +1016,14 @@ it("maps CDP_NETWORK and faucet flag", () => {
   expect(provider).toBeInstanceOf(CdpWalletProvider);
 });
 
-it("rejects an unknown CDP_NETWORK", () => {
+it("falls back to base-sepolia for an unknown VERIFIER_NETWORK", () => {
   expect(() => pickWalletProviderFromEnv({
     WALLET_PROVIDER: "cdp",
-    CDP_NETWORK: "mars",
+    VERIFIER_NETWORK: "mars",
     CDP_API_KEY_ID: "fake",
     CDP_API_KEY_SECRET: "fake",
     CDP_WALLET_SECRET: "fake",
-  })).toThrow(/CDP_NETWORK/);
+  })).not.toThrow();
 });
 ```
 
