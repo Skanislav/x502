@@ -129,9 +129,14 @@ async function main() {
   const rt = readRuntime();
 
   // 3) coordinator
+  // For the local demo, 1claw runs in `local` mode — the coordinator's
+  // signing key is read from the env var named in COORDINATOR_ONECLAW_SCOPE_ID.
+  // We pass the anvil deployer key through that env var.
   process.stdout.write(`[run-stack] starting coordinator on :${rt.coordinator.port}\n`);
   const coordinator = spawnNode("coordinator", "packages/coordinator/src/main.ts", {
     COORDINATOR_PORT: String(rt.coordinator.port),
+    ONECLAW_MODE: "local",
+    COORDINATOR_ONECLAW_SCOPE_ID: "COORDINATOR_PRIVATE_KEY",
     COORDINATOR_PRIVATE_KEY: rt.deployerKey,
     RPC_URL: rt.rpcUrl,
     COORDINATOR_CHAIN_ID: String(rt.chainId),
@@ -150,6 +155,9 @@ async function main() {
   // 4) 3 verifier-agents
   for (const v of rt.verifiers) {
     process.stdout.write(`[run-stack] starting verifier ${v.agentId} on :${v.port}\n`);
+    // Each verifier gets its own scope name so 1claw local mode reads the
+    // right key. The scope name is also the env-var name we set below.
+    const scopeId = `VERIFIER_${v.agentId}_PRIVATE_KEY`;
     const child = spawnNode(`verifier-${v.agentId}`, "packages/verifier-agent/src/main.ts", {
       VERIFIER_AGENT_ID: v.agentId,
       VERIFIER_VAULT_ADDRESS: rt.contracts.vault,
@@ -157,8 +165,9 @@ async function main() {
       VERIFIER_PORT: String(v.port),
       VERIFIER_REPO_SLUG: rt.repo.slug,
       VERIFIER_AGENT_REGISTRY_ADDRESS: rt.contracts.registry,
-      WALLET_PROVIDER: "envkey",
-      VERIFIER_PRIVATE_KEY: v.privateKey,
+      ONECLAW_MODE: "local",
+      ONECLAW_SCOPE_ID: scopeId,
+      [scopeId]: v.privateKey,
       RPC_URL: rt.rpcUrl,
     });
     procs.push({ name: `verifier-${v.agentId}`, child });

@@ -3,23 +3,36 @@
 ///   pnpm --filter @x502/coordinator start
 ///
 /// Required env (see .env.example):
-///   COORDINATOR_PORT              default 8787
-///   COORDINATOR_PRIVATE_KEY       deployer/coordinator key (anvil 0)
-///   RPC_URL                       JSON-RPC endpoint
-///   COORDINATOR_CHAIN_ID          31337 = anvil, 84532 = Base Sepolia
+///   COORDINATOR_PORT                default 8787
+///   RPC_URL                         JSON-RPC endpoint
+///   COORDINATOR_CHAIN_ID            31337 = anvil, 84532 = Base Sepolia
 ///   VAULT_ADDRESS
-///   FACT_PROVIDER_ADDRESS         MockGitHubFactProvider OR GitHubFactReceiver
-///   COORDINATOR_REPO              owner/repo
-///   COORDINATOR_THRESHOLD         M-of-N
-///   COORDINATOR_TRUSTED_AGENT_IDS comma-separated bigints
+///   FACT_PROVIDER_ADDRESS           MockGitHubFactProvider OR GitHubFactReceiver
+///   COORDINATOR_REPO                owner/repo
+///   COORDINATOR_THRESHOLD           M-of-N
+///   COORDINATOR_TRUSTED_AGENT_IDS   comma-separated bigints
 ///   COORDINATOR_VERIFIER_ENDPOINTS  comma-separated http://host:port URLs
 ///   COORDINATOR_VERIFIER_AGENT_IDS  comma-separated bigints, same length
-///   COORDINATOR_FACT_TIMEOUT_MS   default 120000
+///   COORDINATOR_FACT_TIMEOUT_MS     default 120000
 ///   COORDINATOR_VERIFIER_TIMEOUT_MS default 30000
+///
+/// Wallet:
+///   ONECLAW_MODE                    local (default) | remote
+///   COORDINATOR_ONECLAW_SCOPE_ID    1claw scope for the submitter wallet
+///                                   (default `COORDINATOR_PRIVATE_KEY`,
+///                                   which in local mode is also the env-var
+///                                   name holding the key).
 
 import { serve } from "@hono/node-server";
-import { http, type Address, createPublicClient, createWalletClient, isAddress } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { oneClawAccount, pickOneClawFromEnv } from "@x502/shared";
+import {
+  http,
+  type Account,
+  type Address,
+  createPublicClient,
+  createWalletClient,
+  isAddress,
+} from "viem";
 import { base, baseSepolia, foundry } from "viem/chains";
 
 import {
@@ -55,7 +68,13 @@ async function main() {
   if (!isAddress(vault)) throw new Error("VAULT_ADDRESS must be a 0x-address");
   if (!isAddress(factProviderAddr)) throw new Error("FACT_PROVIDER_ADDRESS must be a 0x-address");
 
-  const account = privateKeyToAccount(required(env, "COORDINATOR_PRIVATE_KEY") as `0x${string}`);
+  // Coordinator wallet flows through 1claw too — same custody surface as the
+  // verifiers. In local mode the scope id is the env-var name holding a raw
+  // key; in remote mode it's whatever identifier the 1claw service exposes.
+  const oneClaw = pickOneClawFromEnv(env);
+  const scopeId = env.COORDINATOR_ONECLAW_SCOPE_ID ?? "COORDINATOR_PRIVATE_KEY";
+  const scope = await oneClaw.resolveScope(scopeId);
+  const account = oneClawAccount(oneClaw, scopeId, scope.address);
   const transport = http(rpcUrl);
   const publicClient = createPublicClient({ transport, chain, pollingInterval: 200 });
   const wallet = createWalletClient({ transport, chain, account });
@@ -81,7 +100,7 @@ async function main() {
   const factProvider = new ViemFactProvider(
     publicClient as never,
     wallet as never,
-    account,
+    account as Account,
     factProviderAddr as Address,
   );
   factProvider.start();
@@ -89,7 +108,7 @@ async function main() {
   const vaultWriter = new ViemVaultWriter(
     publicClient as never,
     wallet as never,
-    account,
+    account as Account,
     vault as Address,
   );
 
@@ -110,7 +129,7 @@ async function main() {
   console.log(
     `[x502 coordinator] port=${port} chainId=${chainId} vault=${vault} ` +
       `factProvider=${factProviderAddr} repo=${repoSlug} threshold=${threshold} ` +
-      `verifiers=${verifierEndpoints.length}`,
+      `verifiers=${verifierEndpoints.length} wallet=oneclaw:${scope.kind}@${scope.address}`,
   );
   serve({ fetch: coord.app.fetch, port });
 }
