@@ -4,12 +4,12 @@ pragma solidity ^0.8.26;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
-import {SignatureChecker} from "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {IAgentRegistry} from "./interfaces/IAgentRegistry.sol";
 import {IGitHubFactProvider} from "./interfaces/IGitHubFactProvider.sol";
 import {Attestations} from "./lib/Attestations.sol";
+import {ERC6492SignatureChecker} from "./lib/ERC6492SignatureChecker.sol";
 import {FactBlob} from "./lib/FactBlob.sol";
 
 /// @title  BountyVault — x502 settlement contract.
@@ -213,9 +213,14 @@ contract BountyVault is EIP712, ReentrancyGuard {
         uint256[] calldata agentIds,
         bytes[] calldata signatures,
         bytes32 digest
-    ) internal view {
+    ) internal {
         // Mark seen agents in transient memory; check trust + dedup + sig.
         // O(N*M) trust check is fine — both arrays are small (≤ ~10).
+        //
+        // Note: not `view` because ERC6492SignatureChecker may CALL the
+        // factory embedded in a 6492 signature to deploy a counterfactual
+        // smart wallet. payout's `nonReentrant` modifier blocks that
+        // factory from re-entering the vault.
         for (uint256 i; i < agentIds.length; ++i) {
             uint256 id = agentIds[i];
 
@@ -227,9 +232,10 @@ contract BountyVault is EIP712, ReentrancyGuard {
             // Trust check
             if (!_isTrusted(cfg, id)) revert UntrustedAgent(id);
 
-            // Signature check (EIP-1271 aware via SignatureChecker)
+            // Signature check — accepts EOA (ECDSA), deployed ERC-1271 smart
+            // accounts, AND counterfactual ERC-6492 wrapped sigs.
             address signer = agentRegistry.getAgentWallet(id);
-            if (!SignatureChecker.isValidSignatureNow(signer, digest, signatures[i])) {
+            if (!ERC6492SignatureChecker.isValidSig(signer, digest, signatures[i])) {
                 revert InvalidSignature(id);
             }
         }
