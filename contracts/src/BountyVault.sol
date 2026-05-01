@@ -10,6 +10,7 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol
 import {IAgentRegistry} from "./interfaces/IAgentRegistry.sol";
 import {IGitHubFactProvider} from "./interfaces/IGitHubFactProvider.sol";
 import {Attestations} from "./lib/Attestations.sol";
+import {FactBlob} from "./lib/FactBlob.sol";
 
 /// @title  BountyVault — x502 settlement contract.
 /// @notice Repo owners deposit USDC and configure per-kind prices + a trusted
@@ -74,6 +75,8 @@ contract BountyVault is EIP712, ReentrancyGuard {
     error InvalidSignature(uint256 agentId);
     error FactNotReady();
     error FactHashMismatch();
+    error FactStatusNotOk(uint8 status);
+    error FactMergeMissing();
     error InsufficientRepoBalance();
     error LengthMismatch();
     error ThresholdZero();
@@ -166,6 +169,15 @@ contract BountyVault is EIP712, ReentrancyGuard {
         (ready, L.factBlob) = factProvider.getFact(L.claimId);
         if (!ready) revert FactNotReady();
         if (keccak256(L.factBlob) != factHash) revert FactHashMismatch();
+
+        // The DON's source.js returns status=1 only when its kind-specific rules
+        // pass (see chainlink/source-core.js::decideFact). Reject status=0 here
+        // so the vault enforces the objective half of the two-layer design.
+        FactBlob.Fact memory fb = FactBlob.decode(L.factBlob);
+        if (fb.status != 1) revert FactStatusNotOk(fb.status);
+        if ((kind == Kind.Fix || kind == Kind.DocsTests) && fb.mergedBlock == 0) {
+            revert FactMergeMissing();
+        }
 
         // Verify M-of-N signatures
         L.digest = hashAttestation(

@@ -254,6 +254,124 @@ describe("ClaudePolicy", () => {
     ).resolves.toEqual({ accept: false, reason: "no text response from Claude" });
   });
 
+  describe("walletBinding", () => {
+    const REGISTRY_ADDRESS = "0x1111111111111111111111111111111111111111" as const;
+    const salt = `0x${"11".repeat(32)}` as const;
+
+    function publicClientReturning(wallet: string) {
+      return {
+        readContract: vi.fn(async () => wallet as `0x${string}`),
+      } as never;
+    }
+
+    it("rejects when registry-bound wallet does not match recipient", async () => {
+      const anthropic = anthropicWithText(JSON.stringify({ accept: true, reason: "n/a" }));
+      const repoId = repoIdFromSlug("owner/repo");
+      const commitment = deriveCommitment(101n, repoId, 2n, salt);
+      const octokit = octokitIssue(`body\n<!-- x502-commitment:${commitment} -->`);
+      const wrongWallet = "0x9999999999999999999999999999999999999999";
+
+      const policy = new ClaudePolicy({
+        anthropic: anthropic as never,
+        octokit: octokit as never,
+        walletBinding: { client: publicClientReturning(wrongWallet), address: REGISTRY_ADDRESS },
+      });
+
+      const result = await policy.decide({
+        repoSlug: "owner/repo",
+        externalId: 2n,
+        kind: Kind.Report,
+        recipient: RECIPIENT,
+        factHash: FACT_HASH,
+        agentIdReveal: 101n,
+        saltReveal: salt,
+      });
+
+      expect(result.accept).toBe(false);
+      expect(result.reason).toContain("does not match");
+      expect(anthropic.messages.create).not.toHaveBeenCalled();
+    });
+
+    it("accepts when registry wallet matches recipient and markers agree", async () => {
+      const anthropic = anthropicWithText(JSON.stringify({ accept: true, reason: "ok" }));
+      const repoId = repoIdFromSlug("owner/repo");
+      const commitment = deriveCommitment(101n, repoId, 2n, salt);
+      const body = `body\n<!-- x502-commitment:${commitment} -->\n<!-- x502:${RECIPIENT} -->`;
+      const octokit = octokitIssue(body);
+
+      const policy = new ClaudePolicy({
+        anthropic: anthropic as never,
+        octokit: octokit as never,
+        walletBinding: { client: publicClientReturning(RECIPIENT), address: REGISTRY_ADDRESS },
+      });
+
+      await expect(
+        policy.decide({
+          repoSlug: "owner/repo",
+          externalId: 2n,
+          kind: Kind.Report,
+          recipient: RECIPIENT,
+          factHash: FACT_HASH,
+          agentIdReveal: 101n,
+          saltReveal: salt,
+        }),
+      ).resolves.toEqual({ accept: true, reason: "ok" });
+      expect(userPromptOf(anthropic)).toContain("Commitment verified: true");
+    });
+
+    it("rejects when x502 wallet marker contradicts registry wallet", async () => {
+      const anthropic = anthropicWithText(JSON.stringify({ accept: true, reason: "n/a" }));
+      const repoId = repoIdFromSlug("owner/repo");
+      const commitment = deriveCommitment(101n, repoId, 2n, salt);
+      const wrongMarker = "0x9999999999999999999999999999999999999999";
+      const body = `body\n<!-- x502-commitment:${commitment} -->\n<!-- x502:${wrongMarker} -->`;
+      const octokit = octokitIssue(body);
+
+      const policy = new ClaudePolicy({
+        anthropic: anthropic as never,
+        octokit: octokit as never,
+        walletBinding: { client: publicClientReturning(RECIPIENT), address: REGISTRY_ADDRESS },
+      });
+
+      const result = await policy.decide({
+        repoSlug: "owner/repo",
+        externalId: 2n,
+        kind: Kind.Report,
+        recipient: RECIPIENT,
+        factHash: FACT_HASH,
+        agentIdReveal: 101n,
+        saltReveal: salt,
+      });
+
+      expect(result.accept).toBe(false);
+      expect(result.reason).toContain("wallet marker");
+      expect(anthropic.messages.create).not.toHaveBeenCalled();
+    });
+
+    it("skips wallet check when agentIdReveal is absent", async () => {
+      const anthropic = anthropicWithText(JSON.stringify({ accept: true, reason: "ok" }));
+      const octokit = octokitIssue("body");
+      const readContract = vi.fn();
+
+      const policy = new ClaudePolicy({
+        anthropic: anthropic as never,
+        octokit: octokit as never,
+        walletBinding: { client: { readContract } as never, address: REGISTRY_ADDRESS },
+      });
+
+      await policy.decide({
+        repoSlug: "owner/repo",
+        externalId: 2n,
+        kind: Kind.Report,
+        recipient: RECIPIENT,
+        factHash: FACT_HASH,
+      });
+
+      expect(readContract).not.toHaveBeenCalled();
+      expect(anthropic.messages.create).toHaveBeenCalled();
+    });
+  });
+
   // Current behavior pinned from USER_FLOW.md "Current vs. intent":
   // ClaudePolicy fetches the issue or PR body but does not fetch GitHub comments,
   // so commitments and repro/dedup evidence in comments are invisible here.

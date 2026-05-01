@@ -3,10 +3,17 @@
 /// anvil, no http, no contracts. Exercises the branches the end-to-end test
 /// can't cover cheaply (timeouts, reverts, partial verifier accepts).
 
-import type { Address, Hex } from "viem";
+import { type Address, type Hex, encodeAbiParameters } from "viem";
 import { describe, expect, it, vi } from "vitest";
 
-import { Kind, type SignedAttestation, deriveClaimId, repoIdFromSlug } from "@x502/shared";
+import {
+  type DemoEvent,
+  EventBus,
+  Kind,
+  type SignedAttestation,
+  deriveClaimId,
+  repoIdFromSlug,
+} from "@x502/shared";
 
 import { runClaimPipeline } from "../src/pipeline.js";
 import type {
@@ -392,6 +399,74 @@ describe("runClaimPipeline", () => {
     expect(state.status).toBe("failed");
     expect(state.error).toContain("vault.payout reverted");
     expect(state.error).toContain("AlreadyPaid");
+  });
+
+  it("publishes fact.requested + fact.delivered + payout events when an event bus is provided", async () => {
+    const state = makeState();
+    const factBlob = encodeAbiParameters(
+      [{ type: "uint8" }, { type: "uint64" }, { type: "bytes32" }, { type: "address" }],
+      [1, 12345n, `0x${"00".repeat(32)}` as Hex, RECIPIENT],
+    );
+    const factProvider = new FixedFactProvider(factBlob);
+    const verifiers = [
+      new ScriptedVerifierClient(101n, "v1", { type: "accept" }),
+      new ScriptedVerifierClient(102n, "v2", { type: "accept" }),
+    ];
+    const vault = new ScriptedVault({ type: "ok" });
+    const events = new EventBus();
+    const seen: DemoEvent[] = [];
+    events.subscribe((e) => seen.push(e));
+
+    await runClaimPipeline(state, {
+      factProvider,
+      verifiers,
+      vault,
+      threshold: 2,
+      factTimeoutMs: 1_000,
+      verifierTimeoutMs: 1_000,
+      events,
+    });
+
+    const types = seen.map((e) => e.type);
+    expect(types).toContain("fact.requested");
+    expect(types).toContain("fact.delivered");
+    expect(types).toContain("payout.submitted");
+    expect(types).toContain("payout.confirmed");
+
+    const delivered = seen.find((e) => e.type === "fact.delivered");
+    if (delivered?.type !== "fact.delivered") throw new Error("missing fact.delivered");
+    expect(delivered.status).toBe(1);
+    expect(delivered.mergedBlock).toBe("12345");
+    expect(delivered.ghAuthorBinding.toLowerCase()).toBe(RECIPIENT.toLowerCase());
+  });
+
+  it("does not throw when event-bus decoding fails on a malformed fact blob", async () => {
+    const state = makeState();
+    const factProvider = new FixedFactProvider(FACT_BLOB);
+    const verifiers = [
+      new ScriptedVerifierClient(101n, "v1", { type: "accept" }),
+      new ScriptedVerifierClient(102n, "v2", { type: "accept" }),
+    ];
+    const vault = new ScriptedVault({ type: "ok" });
+    const events = new EventBus();
+    const seen: DemoEvent[] = [];
+    events.subscribe((e) => seen.push(e));
+
+    await runClaimPipeline(state, {
+      factProvider,
+      verifiers,
+      vault,
+      threshold: 2,
+      factTimeoutMs: 1_000,
+      verifierTimeoutMs: 1_000,
+      events,
+    });
+
+    expect(state.status).toBe("paid");
+    // fact.requested still fires (it does not depend on decoding); the
+    // fact.delivered emit is best-effort and may be skipped.
+    expect(seen.map((e) => e.type)).toContain("fact.requested");
+    expect(seen.map((e) => e.type)).toContain("payout.confirmed");
   });
 
   it("each verifier receives the resolved factHash, not a guess", async () => {

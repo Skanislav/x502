@@ -1,82 +1,10 @@
-import {
-  type Account,
-  type Address,
-  type Hex,
-  type PublicClient,
-  type WalletClient,
-  parseEventLogs,
-} from "viem";
-
-import {
-  bountyVaultAbi,
-  bountyVaultBytecode,
-  mockAgentRegistryAbi,
-  mockAgentRegistryBytecode,
-  mockGitHubFactProviderAbi,
-  mockGitHubFactProviderBytecode,
-  mockUSDCAbi,
-  mockUSDCBytecode,
-} from "@x502/shared/abis";
-
-interface DeployedContracts {
-  usdc: Address;
-  registry: Address;
-  factProvider: Address;
-  vault: Address;
-}
-
-async function deploy(
-  publicClient: PublicClient,
-  wallet: WalletClient,
-  account: Account,
-  abi: readonly unknown[],
-  bytecode: Hex,
-  args: readonly unknown[] = [],
-): Promise<Address> {
-  const tx = await wallet.deployContract({
-    abi: abi as never,
-    bytecode,
-    args: args as never,
-    account,
-    chain: null,
-  });
-  const r = await publicClient.waitForTransactionReceipt({ hash: tx });
-  if (!r.contractAddress) throw new Error(`deploy returned no address (tx=${tx})`);
-  return r.contractAddress;
-}
-
-export async function deployAll(
-  publicClient: PublicClient,
-  wallet: WalletClient,
-  account: Account,
-): Promise<DeployedContracts> {
-  const usdc = await deploy(publicClient, wallet, account, mockUSDCAbi, mockUSDCBytecode);
-  const registry = await deploy(
-    publicClient,
-    wallet,
-    account,
-    mockAgentRegistryAbi,
-    mockAgentRegistryBytecode,
-  );
-  const factProvider = await deploy(
-    publicClient,
-    wallet,
-    account,
-    mockGitHubFactProviderAbi,
-    mockGitHubFactProviderBytecode,
-  );
-  const vault = await deploy(publicClient, wallet, account, bountyVaultAbi, bountyVaultBytecode, [
-    usdc,
-    registry,
-    factProvider,
-  ]);
-  return { usdc, registry, factProvider, vault };
-}
-
+/// Re-export so existing test imports stay valid; the canonical implementation
+/// lives in `@x502/shared` so demo scripts and the coordinator main can reuse it.
 export {
   bountyVaultAbi,
   mockAgentRegistryAbi,
   mockGitHubFactProviderAbi,
   mockUSDCAbi,
-  parseEventLogs,
-};
+} from "@x502/shared/abis";
+export { deployAll, type DeployedContracts } from "@x502/shared";
+export { parseEventLogs } from "viem";

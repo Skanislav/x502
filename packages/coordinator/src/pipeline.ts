@@ -1,5 +1,5 @@
-import type { Kind, SignedAttestation } from "@x502/shared";
-import { type Hex, keccak256 } from "viem";
+import type { EventSubscriber, Kind, SignedAttestation } from "@x502/shared";
+import { type Hex, decodeAbiParameters, keccak256 } from "viem";
 
 import type { IFactProvider, IVaultWriter, IVerifierClient } from "./providers.js";
 import type { ClaimState } from "./types.js";
@@ -11,6 +11,11 @@ export interface PipelineDeps {
   threshold: number;
   factTimeoutMs: number;
   verifierTimeoutMs: number;
+  /// Optional sink for live demo events. Pipeline emits fact.requested,
+  /// fact.delivered, payout.submitted, payout.confirmed. Verifier-side events
+  /// (verifier.started/reasoning/signed/rejected) come from the verifiers
+  /// themselves via the coordinator's SSE re-publish bridge.
+  events?: EventSubscriber;
 }
 
 /// Drives a single claim from `verifying` → `paid` (or `failed`). Resolves when
@@ -20,6 +25,7 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
   const { repoId, request, deadline, claimId } = state;
 
   // 1) Trigger Chainlink Functions fact request and verifier fan-out in parallel.
+  deps.events?.publish({ type: "fact.requested", claimId, ts: Date.now() });
   const factPromise = (async () => {
     await deps.factProvider.requestFact(
       claimId,
@@ -33,6 +39,25 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
   const factBlob = await factPromise;
   state.factBlob = factBlob;
   state.factHash = keccak256(factBlob);
+  if (deps.events) {
+    try {
+      const [status, mergedBlock, labelMask, ghAuthorBinding] = decodeAbiParameters(
+        [{ type: "uint8" }, { type: "uint64" }, { type: "bytes32" }, { type: "address" }],
+        factBlob,
+      );
+      deps.events.publish({
+        type: "fact.delivered",
+        claimId,
+        status: Number(status),
+        mergedBlock: mergedBlock.toString(),
+        labelMask: labelMask as Hex,
+        ghAuthorBinding: ghAuthorBinding as `0x${string}`,
+        ts: Date.now(),
+      });
+    } catch {
+      /* unexpected blob shape — skip emit, the vault will still validate. */
+    }
+  }
 
   // 2) Now we know factHash, ask each verifier to sign over it.
   //    (We could fan-out earlier with a guess, but the signed factHash binds
@@ -98,6 +123,8 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
     state.txHash = tx;
     state.status = "paid";
     state.updatedAt = Date.now();
+    deps.events?.publish({ type: "payout.submitted", claimId, txHash: tx, ts: Date.now() });
+    deps.events?.publish({ type: "payout.confirmed", claimId, txHash: tx, ts: Date.now() });
   } catch (e) {
     state.status = "failed";
     state.error = `vault.payout reverted: ${(e as Error).message}`;

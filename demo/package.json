@@ -10,7 +10,9 @@
     "derive-commitment": "tsx scripts/derive-commitment.ts"
   },
   "dependencies": {
-    "@x502/shared": "workspace:*"
+    "@octokit/rest": "^22.0.1",
+    "@x502/shared": "workspace:*",
+    "viem": "^2.21.0"
   },
   "devDependencies": {
     "tsx": "^4.19.0",

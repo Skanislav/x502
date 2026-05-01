@@ -1,7 +1,8 @@
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { type Address, type Hex, isAddress } from "viem";
 
-import { Kind, type KindName, deriveClaimId } from "@x502/shared";
+import { type DemoEvent, EventBus, Kind, type KindName, deriveClaimId } from "@x502/shared";
 
 import { runClaimPipeline } from "./pipeline.js";
 import {
@@ -71,6 +72,8 @@ export interface Coordinator {
   app: Hono;
   /// In-memory claim store (exposed for tests / introspection).
   claims: Map<Hex, ClaimState>;
+  /// Event bus the demo UI subscribes to via SSE. Tests can subscribe directly.
+  events: EventBus;
 }
 
 export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
@@ -81,6 +84,7 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
   const pollRetryAfterSec = opts.pollRetryAfterSec ?? 5;
 
   const claims = new Map<Hex, ClaimState>();
+  const events = new EventBus();
   const app = new Hono();
 
   // Mount the x402 (or noop) gate. It registers a global middleware that
@@ -135,6 +139,15 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
       return c.json({ error: state.error }, 503);
     }
 
+    events.publish({
+      type: "claim.opened",
+      claimId,
+      repoSlug: parsed.repoSlug,
+      kind: parsed.kind,
+      recipient: parsed.recipient,
+      ts: Date.now(),
+    });
+
     // Fire pipeline; do NOT await — return poll URL immediately.
     runClaimPipeline(state, {
       factProvider: opts.factProvider,
@@ -143,6 +156,7 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
       threshold: repo.threshold,
       factTimeoutMs,
       verifierTimeoutMs,
+      events,
     }).catch((e) => {
       state.status = "failed";
       state.error = `pipeline crashed: ${(e as Error).message}`;
@@ -182,5 +196,59 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
     );
   });
 
-  return { app, claims };
+  app.get("/events", (c) =>
+    streamSSE(c, async (stream) => {
+      const sub = events.subscribe((event) => {
+        stream.writeSSE({ data: JSON.stringify(event) }).catch(() => {
+          /* writer closed — handled below */
+        });
+      });
+      stream.onAbort(() => sub.close());
+      // Hold the connection open until the client disconnects.
+      await new Promise<void>((res) => {
+        stream.onAbort(() => res());
+      });
+    }),
+  );
+
+  // Best-effort: subscribe to each verifier's /events stream and re-publish
+  // its events on our bus. If a verifier doesn't expose /events (e.g. unit
+  // test stub), the request just fails silently.
+  for (const v of opts.verifiers) {
+    void subscribeToVerifierEvents(v.endpoint, events);
+  }
+
+  return { app, claims, events };
+}
+
+async function subscribeToVerifierEvents(endpoint: string, bus: EventBus): Promise<void> {
+  // Tiny SSE consumer — fetch the endpoint, parse `data: ` lines, publish.
+  // Not robust against reconnects; the demo is a one-shot stack so OK.
+  try {
+    const res = await fetch(`${endpoint}/events`);
+    if (!res.ok || !res.body) return;
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buf += decoder.decode(value, { stream: true });
+      for (;;) {
+        const idx = buf.indexOf("\n\n");
+        if (idx === -1) break;
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const dataLine = chunk.split("\n").find((l) => l.startsWith("data:"));
+        if (!dataLine) continue;
+        try {
+          bus.publish(JSON.parse(dataLine.slice(5).trim()) as DemoEvent);
+        } catch {
+          /* malformed event — skip */
+        }
+      }
+    }
+  } catch {
+    /* verifier doesn't expose /events — that's fine */
+  }
 }
