@@ -1,31 +1,34 @@
-/// Verifier-agent entrypoint. Bootstraps a wallet (env-key OR CDP/AgentKit),
-/// builds the Hono app, and serves on the configured port.
+/// Verifier-agent entrypoint. Bootstraps a wallet via 1claw, builds the Hono
+/// app, and serves on the configured port.
 ///
 ///   pnpm --filter @x502/verifier-agent start
 ///
 /// Required env (see .env.example for the full surface):
-///   VERIFIER_AGENT_ID         ERC-8004 token id this agent represents
-///   VERIFIER_VAULT_ADDRESS    BountyVault address on the chain below
-///   VERIFIER_CHAIN_ID         84532 = Base Sepolia, 8453 = Base
-///   VERIFIER_PORT             default 9000
-///   WALLET_PROVIDER           envkey (default) | cdp
+///   VERIFIER_AGENT_ID                  ERC-8004 token id this agent represents
+///   VERIFIER_VAULT_ADDRESS             BountyVault address on the chain below
+///   VERIFIER_CHAIN_ID                  84532 = Base Sepolia, 8453 = Base
+///   VERIFIER_PORT                      default 9000
+///   ONECLAW_MODE                       local (default) | remote
+///   ONECLAW_SCOPE_ID                   wallet scope inside 1claw (default
+///                                      VERIFIER_PRIVATE_KEY = the env-var
+///                                      name local mode reads from)
 ///
-/// Optional — if both ANTHROPIC_API_KEY and GITHUB_TOKEN are set, the agent
-/// boots with ClaudePolicy instead of AcceptAllPolicy. If
-/// VERIFIER_AGENT_REGISTRY_ADDRESS is also set, the policy enforces the
-/// wallet-binding check (recipient == registry.getAgentWallet(agentIdReveal)).
+/// Optional — when ClaudePolicy can be constructed (Anthropic + GitHub
+/// credentials retrievable from 1claw via `getSecret`), the agent boots with
+/// it instead of AcceptAllPolicy. If VERIFIER_AGENT_REGISTRY_ADDRESS is also
+/// set, the policy enforces the wallet-binding check.
 
 import Anthropic from "@anthropic-ai/sdk";
 import { serve } from "@hono/node-server";
 import { Octokit } from "@octokit/rest";
-import type { AgentRegistryClient } from "@x502/shared";
+import { type AgentRegistryClient, type OneClawClient, pickOneClawFromEnv } from "@x502/shared";
 import { http, type Address, createPublicClient, isAddress } from "viem";
 import { base, baseSepolia, foundry } from "viem/chains";
 
 import { AcceptAllPolicy, type DecisionPolicy } from "./decide.js";
 import { ClaudePolicy } from "./policies/claude.js";
 import { buildVerifierApp } from "./server.js";
-import { pickWalletProviderFromEnv } from "./wallet/index.js";
+import { OneClawWalletProvider } from "./wallet/index.js";
 
 function chainFromId(id: number) {
   if (id === base.id) return base;
@@ -34,9 +37,13 @@ function chainFromId(id: number) {
   throw new Error(`unsupported chainId ${id}`);
 }
 
-function buildPolicy(env: NodeJS.ProcessEnv, chainId: number): DecisionPolicy {
-  const anthropicKey = env.ANTHROPIC_API_KEY;
-  const githubToken = env.GITHUB_TOKEN;
+async function buildPolicy(
+  env: NodeJS.ProcessEnv,
+  oneClaw: OneClawClient,
+  chainId: number,
+): Promise<DecisionPolicy> {
+  const anthropicKey = await oneClaw.getSecret("ANTHROPIC_API_KEY");
+  const githubToken = await oneClaw.getSecret("GITHUB_TOKEN");
   if (!anthropicKey || !githubToken) return new AcceptAllPolicy();
 
   const anthropic = new Anthropic({ apiKey: anthropicKey });
@@ -46,9 +53,6 @@ function buildPolicy(env: NodeJS.ProcessEnv, chainId: number): DecisionPolicy {
   let walletBinding: AgentRegistryClient | undefined;
   if (registryAddress && isAddress(registryAddress)) {
     const chain = chainFromId(chainId);
-    // Cast — viem infers PublicClient generics from the chain union in a way
-    // strict TS can't unify; the AgentRegistryClient interface only needs
-    // `readContract`, which is invariant across the union.
     const client = createPublicClient({
       chain,
       transport: http(env.RPC_URL),
@@ -72,14 +76,16 @@ async function main() {
   const port = Number(env.VERIFIER_PORT ?? "9000");
   const repoSlug = env.VERIFIER_REPO_SLUG ?? "";
 
-  const provider = pickWalletProviderFromEnv(env);
-  const wallet = await provider.bootstrap({
+  const oneClaw = pickOneClawFromEnv(env);
+  const scopeId = env.ONECLAW_SCOPE_ID ?? "VERIFIER_PRIVATE_KEY";
+  const walletProvider = new OneClawWalletProvider(oneClaw, scopeId);
+  const wallet = await walletProvider.bootstrap({
     chain,
     rpcUrl: env.RPC_URL,
     agentId,
   });
 
-  const policy = buildPolicy(env, chainId);
+  const policy = await buildPolicy(env, oneClaw, chainId);
 
   const app = buildVerifierApp({
     signer: {

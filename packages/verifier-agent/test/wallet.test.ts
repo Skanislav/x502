@@ -1,30 +1,18 @@
-/// Unit tests for the wallet-provider abstraction. Covers:
-/// - EnvKeyProvider: derived address matches the private key
-/// - pickWalletProviderFromEnv: env routing + missing-key error
+/// Unit tests for the wallet-provider abstraction. Today there is exactly one
+/// provider — `OneClawWalletProvider` — backed by `pickOneClawFromEnv`. We
+/// cover:
+///   - bootstrap returns a viem Account whose address matches what 1claw
+///     resolved (local mode = derived from the env-bound private key)
+///   - signing flows through the OneClaw client (delegation contract)
+///   - pickWalletProviderFromEnv routes ONECLAW_MODE / ONECLAW_SCOPE_ID
 
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-const cdpMocks = vi.hoisted(() => ({
-  CdpClient: vi.fn(),
-  getOrCreateAccount: vi.fn(),
-  getOrCreateSmartAccount: vi.fn(),
-}));
+import { localOneClaw } from "@x502/shared";
 
-vi.mock("@coinbase/cdp-sdk", () => ({
-  CdpClient: cdpMocks.CdpClient,
-}));
-
-import {
-  CdpWalletProvider,
-  EnvKeyWalletProvider,
-  pickWalletProviderFromEnv,
-} from "../src/index.js";
-
-const EOA_ADDRESS = "0x1111111111111111111111111111111111111111";
-const OWNER_ADDRESS = "0x2222222222222222222222222222222222222222";
-const SMART_ADDRESS = "0x3333333333333333333333333333333333333333";
+import { OneClawWalletProvider, pickWalletProviderFromEnv } from "../src/index.js";
 
 const typedData = {
   domain: { name: "x502", version: "1", chainId: 31337 },
@@ -35,253 +23,84 @@ const typedData = {
   message: { agentId: 101n },
 } as const;
 
-beforeEach(() => {
-  vi.resetAllMocks();
-  cdpMocks.CdpClient.mockImplementation(() => ({
-    evm: {
-      getOrCreateAccount: cdpMocks.getOrCreateAccount,
-      getOrCreateSmartAccount: cdpMocks.getOrCreateSmartAccount,
-    },
-  }));
-});
-
-function mockEoaAccount(address: `0x${string}` = EOA_ADDRESS) {
-  const requestFaucet = vi.fn().mockResolvedValue(undefined);
-  const networkAccount = { requestFaucet };
-  const signMessage = vi.fn(function (this: { address: `0x${string}` }, parameters: unknown) {
-    expect(this.address).toBe(address);
-    expect(parameters).toBeDefined();
-    return Promise.resolve("0x0101");
-  });
-  const signTransaction = vi.fn(function (this: { address: `0x${string}` }, parameters: unknown) {
-    expect(this.address).toBe(address);
-    expect(parameters).toBeDefined();
-    return Promise.resolve("0x0202");
-  });
-  const signTypedData = vi.fn(function (this: { address: `0x${string}` }, parameters: unknown) {
-    expect(this.address).toBe(address);
-    expect(parameters).toBeDefined();
-    return Promise.resolve("0x0303");
-  });
-  const account = {
-    address,
-    signMessage,
-    signTransaction,
-    signTypedData,
-    useNetwork: vi.fn().mockResolvedValue(networkAccount),
-  };
-
-  cdpMocks.getOrCreateAccount.mockResolvedValue(account);
-
-  return { account, requestFaucet };
-}
-
-function mockSmartAccount() {
-  const owner = {
-    address: OWNER_ADDRESS,
-    signMessage: vi.fn().mockResolvedValue("0x01"),
-    signTransaction: vi.fn().mockResolvedValue("0x02"),
-    signTypedData: vi.fn().mockResolvedValue("0x03"),
-    useNetwork: vi.fn(),
-  };
-  const scoped = {
-    signTypedData: vi.fn().mockResolvedValue("0x04"),
-    requestFaucet: vi.fn().mockResolvedValue(undefined),
-  };
-  const smart = {
-    address: SMART_ADDRESS,
-    useNetwork: vi.fn().mockResolvedValue(scoped),
-  };
-
-  cdpMocks.getOrCreateAccount.mockResolvedValue(owner);
-  cdpMocks.getOrCreateSmartAccount.mockResolvedValue(smart);
-
-  return { owner, scoped, smart };
-}
-
-describe("EnvKeyWalletProvider", () => {
-  it("returns an Account whose address matches the private key", async () => {
+describe("OneClawWalletProvider", () => {
+  it("bootstrap returns an Account whose address matches the resolved scope", async () => {
     const pk = generatePrivateKey();
     const expected = privateKeyToAccount(pk).address;
+    const client = localOneClaw({ MY_KEY: pk });
 
-    const provider = new EnvKeyWalletProvider(pk);
-    const wallet = await provider.bootstrap({
-      chain: foundry,
-      agentId: 100n,
-    });
+    const provider = new OneClawWalletProvider(client, "MY_KEY");
+    const wallet = await provider.bootstrap({ chain: foundry, agentId: 101n });
 
     expect(wallet.address.toLowerCase()).toBe(expected.toLowerCase());
     expect(wallet.account.address.toLowerCase()).toBe(expected.toLowerCase());
-    expect(wallet.agentId).toBe(100n);
-    expect(wallet.source).toBe("envkey");
-  });
-
-  it("constructed walletClient signs with the same address", async () => {
-    const pk = generatePrivateKey();
-    const provider = new EnvKeyWalletProvider(pk);
-    const wallet = await provider.bootstrap({ chain: foundry, agentId: 1n });
-    expect(wallet.walletClient.account?.address.toLowerCase()).toBe(wallet.address.toLowerCase());
-  });
-});
-
-describe("CdpWalletProvider", () => {
-  it("bootstraps an EOA wallet and requests testnet ETH when enabled", async () => {
-    const { account, requestFaucet } = mockEoaAccount();
-    const messagePayload = { message: "hello agent" } as const;
-    const transactionPayload = {
-      to: "0x4444444444444444444444444444444444444444",
-      value: 1n,
-      chainId: foundry.id,
-      gas: 21_000n,
-      nonce: 0,
-    } as const;
-    const provider = new CdpWalletProvider({
-      accountName: "agent",
-      mode: "eoa",
-      network: "base-sepolia",
-      faucet: true,
-    });
-
-    const wallet = await provider.bootstrap({
-      chain: foundry,
-      agentId: 101n,
-    });
-
-    expect(cdpMocks.getOrCreateAccount).toHaveBeenCalledWith({ name: "agent" });
-    expect(account.useNetwork).toHaveBeenCalledWith("base-sepolia");
-    expect(requestFaucet).toHaveBeenCalledWith({ token: "eth" });
-    expect(wallet.source).toBe("cdp:eoa");
-    expect(wallet.address).toBe(EOA_ADDRESS);
-    expect(wallet.account.address).toBe(EOA_ADDRESS);
     expect(wallet.agentId).toBe(101n);
-    await expect(wallet.account.signMessage(messagePayload)).resolves.toBe("0x0101");
-    expect(account.signMessage).toHaveBeenCalledWith(messagePayload);
-    await expect(wallet.account.signTransaction(transactionPayload)).resolves.toBe("0x0202");
-    expect(account.signTransaction).toHaveBeenCalledWith(transactionPayload);
-    await expect(wallet.account.signTypedData(typedData)).resolves.toBe("0x0303");
-    expect(account.signTypedData).toHaveBeenCalledWith(typedData);
+    expect(wallet.source).toBe("oneclaw:eoa");
   });
 
-  it("bootstraps a smart wallet with scoped typed-data signing", async () => {
-    const { owner, scoped, smart } = mockSmartAccount();
-    const provider = new CdpWalletProvider({ accountName: "agent", mode: "smart" });
+  it("Account.signTypedData delegates to the OneClaw client and returns its signature", async () => {
+    const pk = generatePrivateKey();
+    const client = localOneClaw({ MY_KEY: pk });
 
-    const wallet = await provider.bootstrap({
-      chain: foundry,
-      agentId: 101n,
-    });
+    const provider = new OneClawWalletProvider(client, "MY_KEY");
+    const wallet = await provider.bootstrap({ chain: foundry, agentId: 1n });
 
-    expect(cdpMocks.getOrCreateAccount).toHaveBeenCalledWith({ name: "agent-owner" });
-    expect(cdpMocks.getOrCreateSmartAccount).toHaveBeenCalledWith({
-      name: "agent",
-      owner,
-    });
-    expect(smart.useNetwork).toHaveBeenCalledWith("base-sepolia");
-    expect(wallet.source).toBe("cdp:smart");
-    await expect(wallet.account.signMessage({ message: "hello" })).rejects.toThrow(
-      /signMessage is not supported/,
-    );
+    // Deterministic EIP-712 sig — local mode is just viem under the hood.
+    const expected = await privateKeyToAccount(pk).signTypedData(typedData);
+    const actual = await wallet.account.signTypedData(typedData);
+    expect(actual).toBe(expected);
+  });
 
-    await expect(wallet.account.signTypedData(typedData)).resolves.toBe("0x04");
-    expect(scoped.signTypedData).toHaveBeenCalledWith(typedData);
+  it("constructed walletClient uses the resolved address as its account", async () => {
+    const pk = generatePrivateKey();
+    const expected = privateKeyToAccount(pk).address;
+    const client = localOneClaw({ MY_KEY: pk });
+
+    const provider = new OneClawWalletProvider(client, "MY_KEY");
+    const wallet = await provider.bootstrap({ chain: foundry, agentId: 1n });
+
+    expect(wallet.walletClient.account?.address.toLowerCase()).toBe(expected.toLowerCase());
+  });
+
+  it("bootstrap surfaces a clear error when the scope is not bound in env", async () => {
+    const client = localOneClaw({});
+    const provider = new OneClawWalletProvider(client, "UNSET_KEY");
+    await expect(provider.bootstrap({ chain: foundry, agentId: 1n })).rejects.toThrow(/UNSET_KEY/);
   });
 });
 
 describe("pickWalletProviderFromEnv", () => {
-  it("defaults to envkey when WALLET_PROVIDER is unset", () => {
+  it("returns a OneClawWalletProvider that resolves VERIFIER_PRIVATE_KEY by default", async () => {
     const pk = generatePrivateKey();
+    const expected = privateKeyToAccount(pk).address;
+
     const provider = pickWalletProviderFromEnv({ VERIFIER_PRIVATE_KEY: pk });
-    expect(provider).toBeInstanceOf(EnvKeyWalletProvider);
+    expect(provider).toBeInstanceOf(OneClawWalletProvider);
+    const wallet = await provider.bootstrap({ chain: foundry, agentId: 1n });
+    expect(wallet.address.toLowerCase()).toBe(expected.toLowerCase());
   });
 
-  it("returns EnvKeyWalletProvider when WALLET_PROVIDER=envkey", () => {
+  it("respects ONECLAW_SCOPE_ID override", async () => {
     const pk = generatePrivateKey();
+    const expected = privateKeyToAccount(pk).address;
+
     const provider = pickWalletProviderFromEnv({
-      WALLET_PROVIDER: "envkey",
-      VERIFIER_PRIVATE_KEY: pk,
+      ONECLAW_SCOPE_ID: "MY_SCOPE",
+      MY_SCOPE: pk,
     });
-    expect(provider).toBeInstanceOf(EnvKeyWalletProvider);
+    const wallet = await provider.bootstrap({ chain: foundry, agentId: 1n });
+    expect(wallet.address.toLowerCase()).toBe(expected.toLowerCase());
   });
 
-  it("throws when envkey is selected but VERIFIER_PRIVATE_KEY is missing", () => {
-    expect(() => pickWalletProviderFromEnv({ WALLET_PROVIDER: "envkey" })).toThrow(
-      /VERIFIER_PRIVATE_KEY/,
+  it("ONECLAW_MODE=remote selects the remote stub which fails-fast on bootstrap", async () => {
+    const provider = pickWalletProviderFromEnv({ ONECLAW_MODE: "remote" });
+    expect(provider).toBeInstanceOf(OneClawWalletProvider);
+    await expect(provider.bootstrap({ chain: foundry, agentId: 1n })).rejects.toThrow(
+      /not yet wired/,
     );
   });
 
-  it("returns CdpWalletProvider (smart, default) when WALLET_PROVIDER=cdp", () => {
-    // Constructor doesn't make a network call — only `bootstrap()` does — so
-    // we can pin the type without real credentials.
-    const provider = pickWalletProviderFromEnv({
-      WALLET_PROVIDER: "cdp",
-      VERIFIER_AGENT_ID: "101",
-      CDP_API_KEY_ID: "fake",
-      CDP_API_KEY_SECRET: "fake",
-      CDP_WALLET_SECRET: "fake",
-    });
-    expect(provider).toBeInstanceOf(CdpWalletProvider);
-  });
-
-  it("accepts CDP_WALLET_MODE=eoa", () => {
-    const provider = pickWalletProviderFromEnv({
-      WALLET_PROVIDER: "cdp",
-      CDP_WALLET_MODE: "eoa",
-      VERIFIER_AGENT_ID: "101",
-      CDP_API_KEY_ID: "fake",
-      CDP_API_KEY_SECRET: "fake",
-      CDP_WALLET_SECRET: "fake",
-    });
-    expect(provider).toBeInstanceOf(CdpWalletProvider);
-  });
-
-  it("maps VERIFIER_NETWORK and faucet flag", async () => {
-    const { scoped, smart } = mockSmartAccount();
-    const provider = pickWalletProviderFromEnv({
-      WALLET_PROVIDER: "cdp",
-      CDP_WALLET_MODE: "smart",
-      VERIFIER_NETWORK: "base",
-      CDP_REQUEST_FAUCET: "true",
-      CDP_API_KEY_ID: "fake",
-      CDP_API_KEY_SECRET: "fake",
-      CDP_WALLET_SECRET: "fake",
-    });
-
-    await provider.bootstrap({ chain: foundry, agentId: 101n });
-
-    expect(provider).toBeInstanceOf(CdpWalletProvider);
-    expect(smart.useNetwork).toHaveBeenCalledWith("base");
-    expect(scoped.requestFaucet).toHaveBeenCalledWith({ token: "eth" });
-  });
-
-  it("falls back to base-sepolia for an unknown VERIFIER_NETWORK", async () => {
-    const { smart } = mockSmartAccount();
-    const provider = pickWalletProviderFromEnv({
-      WALLET_PROVIDER: "cdp",
-      VERIFIER_NETWORK: "mars",
-      CDP_API_KEY_ID: "fake",
-      CDP_API_KEY_SECRET: "fake",
-      CDP_WALLET_SECRET: "fake",
-    });
-
-    await provider.bootstrap({ chain: foundry, agentId: 101n });
-
-    expect(provider).toBeInstanceOf(CdpWalletProvider);
-    expect(smart.useNetwork).toHaveBeenCalledWith("base-sepolia");
-  });
-
-  it("rejects an unknown CDP_WALLET_MODE", () => {
-    expect(() =>
-      pickWalletProviderFromEnv({
-        WALLET_PROVIDER: "cdp",
-        CDP_WALLET_MODE: "wat",
-        CDP_API_KEY_ID: "fake",
-        CDP_API_KEY_SECRET: "fake",
-        CDP_WALLET_SECRET: "fake",
-      }),
-    ).toThrow(/CDP_WALLET_MODE/);
-  });
-
-  it("throws on unknown WALLET_PROVIDER", () => {
-    expect(() => pickWalletProviderFromEnv({ WALLET_PROVIDER: "wat" })).toThrow(/Unknown/);
+  it("rejects an unknown ONECLAW_MODE up front", () => {
+    expect(() => pickWalletProviderFromEnv({ ONECLAW_MODE: "wat" })).toThrow(/Unknown/);
   });
 });

@@ -12,8 +12,6 @@ import {
   http,
   type Address,
   type Hex,
-  type PublicClient,
-  type WalletClient,
   createPublicClient,
   createWalletClient,
   encodeAbiParameters,
@@ -21,6 +19,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
+import { pickOneClawFromEnv } from "@x502/shared";
 import { mockGitHubFactProviderAbi } from "@x502/shared/abis";
 
 import { decideFact, parseRepoSlug } from "../../chainlink/source-core.js";
@@ -75,7 +74,12 @@ function encodeBlob(fact: {
 
 async function main() {
   const rt = readRuntime();
-  const octokit = new Octokit({ auth: process.env.GITHUB_TOKEN });
+  const oneClaw = pickOneClawFromEnv(process.env);
+  const githubToken = await oneClaw.getSecret("GITHUB_TOKEN");
+  const octokit = new Octokit({ auth: githubToken });
+  // Auto-fulfill is part of the local demo only — it spends the anvil
+  // deployer's gas to call mockFulfill. The deployer key already lives in
+  // addresses.json so we don't route this signer through 1claw.
   const account = privateKeyToAccount(rt.deployerKey);
   const transport = http(rt.rpcUrl);
   const publicClient = createPublicClient({
