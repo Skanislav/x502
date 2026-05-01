@@ -1,0 +1,27 @@
+{
+  "_comment": "Replace this fixture with a real recorded Base Sepolia run. Each entry is one bounty kind. After running the live Sepolia flow, capture the claimId, payout txHash, factHash, and verifier signatures from coordinator logs.",
+  "network": {
+    "chainId": 84532,
+    "label": "Base Sepolia",
+    "explorer": "https://sepolia.basescan.org"
+  },
+  "vault": "0x0000000000000000000000000000000000000000",
+  "factReceiver": "0x0000000000000000000000000000000000000000",
+  "runs": [
+    {
+      "kind": "report",
+      "repo": "skanislav/x502-sepolia-demo",
+      "externalId": "1",
+      "claimId": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "factHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "payoutTx": "0x0000000000000000000000000000000000000000000000000000000000000000",
+      "claimant": "0x0000000000000000000000000000000000000000",
+      "claimantAmountUsdc": "4.80",
+      "verifierSignatures": [
+        { "agentId": "101", "signature": "0x" },
+        { "agentId": "102", "signature": "0x" }
+      ],
+      "_status": "placeholder"
+    }
+  ]
+}

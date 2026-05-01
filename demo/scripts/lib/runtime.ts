@@ -1,0 +1,51 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+import type { Address, Hex } from "viem";
+
+/// JSON state shared across demo scripts. Lives at `demo/.runtime/addresses.json`.
+export interface DemoRuntime {
+  rpcUrl: string;
+  chainId: number;
+  /// Anvil prefunded key (deployer + repo owner + coordinator).
+  deployerKey: Hex;
+  contracts: {
+    usdc: Address;
+    registry: Address;
+    factProvider: Address;
+    vault: Address;
+  };
+  repo: {
+    slug: string;
+    repoId: Hex;
+    threshold: number;
+    trustedAgentIds: string[]; // bigints serialized
+  };
+  verifiers: Array<{
+    agentId: string; // bigint serialized
+    privateKey: Hex;
+    address: Address;
+    endpoint: string;
+    port: number;
+  }>;
+  coordinator: { endpoint: string; port: number };
+  web: { port: number };
+}
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+export const RUNTIME_DIR = resolve(__dirname, "..", "..", ".runtime");
+export const ADDRESSES_PATH = resolve(RUNTIME_DIR, "addresses.json");
+
+export function ensureRuntimeDir(): void {
+  mkdirSync(RUNTIME_DIR, { recursive: true });
+}
+
+export function writeRuntime(rt: DemoRuntime): void {
+  ensureRuntimeDir();
+  writeFileSync(ADDRESSES_PATH, `${JSON.stringify(rt, null, 2)}\n`);
+}
+
+export function readRuntime(): DemoRuntime {
+  return JSON.parse(readFileSync(ADDRESSES_PATH, "utf8")) as DemoRuntime;
+}

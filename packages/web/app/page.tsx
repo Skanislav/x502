@@ -1,5 +1,8 @@
 "use client";
 
+import { DemoStepper, type StepKey, stepFromPipeline } from "@/components/DemoStepper";
+import { SepoliaReplay } from "@/components/SepoliaReplay";
+import { VerifierTheater } from "@/components/VerifierTheater";
 import { type PipelineState, mapPoll, previewCommitment } from "@/lib/claim-ui";
 import { CoordinatorClient } from "@/lib/coordinator";
 import { basescanTx, formatUsdc, shortHash } from "@/lib/format";
@@ -8,6 +11,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { type Address, type Hex, isAddress } from "viem";
 
 const DEFAULT_COORDINATOR = process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "http://localhost:8787";
+
+interface DemoConfig {
+  coordinator: { endpoint: string };
+  verifiers: Array<{ agentId: string }>;
+  repo: { slug: string };
+}
 
 const KIND_META: Record<KindName, { label: string; price: bigint; description: string }> = {
   report: {
@@ -32,8 +41,8 @@ const KIND_META: Record<KindName, { label: string; price: bigint; description: s
   },
 };
 
-const OUTCOME_FEE_PER_VERIFIER = 100_000n; // $0.10
-const VERIFIER_COUNT = 2; // 2-of-3 demo
+const OUTCOME_FEE_PER_VERIFIER = 100_000n;
+const VERIFIER_COUNT = 2;
 
 export default function Page() {
   const [coordinatorUrl, setCoordinatorUrl] = useState(DEFAULT_COORDINATOR);
@@ -49,8 +58,28 @@ export default function Page() {
   const [pipeline, setPipeline] = useState<PipelineState>({ status: "idle" });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Demo-mode state — populated by /api/demo-config when ?mode=demo is set.
+  const [demoMode, setDemoMode] = useState(false);
+  const [demoCfg, setDemoCfg] = useState<DemoConfig | undefined>();
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const search = new URLSearchParams(window.location.search);
+    if (search.get("mode") !== "demo") return;
+    setDemoMode(true);
+    fetch("/api/demo-config")
+      .then((r) => (r.ok ? (r.json() as Promise<DemoConfig>) : undefined))
+      .then((cfg) => {
+        if (!cfg) return;
+        setDemoCfg(cfg);
+        setCoordinatorUrl(cfg.coordinator.endpoint);
+        setRepoSlug(cfg.repo.slug);
+      })
+      .catch(() => undefined);
+  }, []);
+
   const meta = KIND_META[kind];
   const claimantAmount = meta.price - OUTCOME_FEE_PER_VERIFIER * BigInt(VERIFIER_COUNT);
+  const stepperStep: StepKey = demoMode ? stepFromPipeline(pipeline) : "intro";
 
   const commitmentPreview = useMemo(
     () => previewCommitment({ repoSlug, externalId, agentIdReveal, saltReveal }),
@@ -101,28 +130,13 @@ export default function Page() {
           }
         }
       } catch (e) {
-        // keep polling on transient network errors
         console.warn("poll error", e);
       }
     }, 1500);
   }
 
-  return (
-    <main className="mx-auto max-w-3xl p-8 space-y-10">
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">
-          x502
-          <span className="text-muted text-base ml-3">
-            services pay agents for verifiable GitHub outcomes
-          </span>
-        </h1>
-        <p className="text-sm text-muted leading-6">
-          File a claim against a vault-funded repo. The coordinator routes the claim through
-          Chainlink Functions (objective fact) and N-of-M verifier agents (subjective judgment),
-          then settles to your wallet on Base.
-        </p>
-      </header>
-
+  const claimForm = (
+    <>
       <section className="space-y-4">
         <h2 className="text-xs uppercase tracking-widest text-muted">Coordinator</h2>
         <input
@@ -187,7 +201,7 @@ export default function Page() {
           />
         </Field>
 
-        <details className="text-sm">
+        <details className="text-sm" open={demoMode}>
           <summary className="cursor-pointer text-muted">
             Identity binding (commitment reveal)
           </summary>
@@ -254,6 +268,48 @@ export default function Page() {
           <PipelineStatus state={pipeline} />
         </section>
       )}
+    </>
+  );
+
+  return (
+    <main className={`mx-auto p-8 space-y-10 ${demoMode ? "max-w-7xl" : "max-w-3xl"}`}>
+      <header className="space-y-2">
+        <h1 className="text-3xl font-bold tracking-tight">
+          x502
+          <span className="text-muted text-base ml-3">
+            services pay agents for verifiable GitHub outcomes
+          </span>
+        </h1>
+        <p className="text-sm text-muted leading-6">
+          File a claim against a vault-funded repo. The coordinator routes the claim through
+          Chainlink Functions (objective fact) and N-of-M verifier agents (subjective judgment),
+          then settles to your wallet on Base.
+        </p>
+        {demoMode && (
+          <div className="text-xs text-accent">
+            demo mode {demoCfg ? `· coordinator ${demoCfg.coordinator.endpoint}` : ""}
+          </div>
+        )}
+      </header>
+
+      {demoMode ? (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="space-y-6">
+            <DemoStepper current={stepperStep} />
+          </div>
+          <div className="space-y-6">{claimForm}</div>
+          <div className="space-y-6">
+            <VerifierTheater
+              coordinatorUrl={coordinatorUrl}
+              claimId={pipeline.claimId}
+              agentIds={demoCfg?.verifiers.map((v) => v.agentId) ?? ["101", "102", "103"]}
+            />
+            <SepoliaReplay />
+          </div>
+        </div>
+      ) : (
+        claimForm
+      )}
 
       <footer className="text-xs text-muted pt-4 border-t border-paper/10 space-y-1">
         <div>
@@ -293,7 +349,6 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    // Field renders the form control through children; Biome cannot infer that relationship.
     // biome-ignore lint/a11y/noLabelWithoutControl: child inputs are nested inside this label.
     <label className="block space-y-1">
       <span className="text-xs text-muted">{label}</span>

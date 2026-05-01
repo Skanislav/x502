@@ -1,5 +1,6 @@
-import { type Attestation, type Kind, deriveClaimId } from "@x502/shared";
+import { type Attestation, EventBus, type Kind, deriveClaimId } from "@x502/shared";
 import { Hono } from "hono";
+import { streamSSE } from "hono/streaming";
 import { type Address, type Hex, isAddress, isHex } from "viem";
 
 import type { DecisionPolicy } from "./decide.js";
@@ -49,6 +50,7 @@ function parseBody(b: VerifyBody) {
 
 export function buildVerifierApp(opts: VerifierServerOptions) {
   const app = new Hono();
+  const events = new EventBus();
 
   app.get("/health", (c) =>
     c.json({
@@ -57,6 +59,20 @@ export function buildVerifierApp(opts: VerifierServerOptions) {
       address: opts.signer.account.address,
       vault: opts.signer.vault,
       chainId: opts.signer.chainId,
+    }),
+  );
+
+  app.get("/events", (c) =>
+    streamSSE(c, async (stream) => {
+      const sub = events.subscribe((event) => {
+        stream.writeSSE({ data: JSON.stringify(event) }).catch(() => {
+          /* writer closed */
+        });
+      });
+      stream.onAbort(() => sub.close());
+      await new Promise<void>((res) => {
+        stream.onAbort(() => res());
+      });
     }),
   );
 
@@ -71,6 +87,10 @@ export function buildVerifierApp(opts: VerifierServerOptions) {
     const repoSlug = opts.repoSlugResolver(parsed.repoId);
     if (!repoSlug) return c.json({ error: "unknown repoId" }, 404);
 
+    const claimId = deriveClaimId(parsed.repoId, parsed.externalId, parsed.kind);
+    const agentIdStr = opts.signer.agentId.toString();
+    events.publish({ type: "verifier.started", claimId, agentId: agentIdStr, ts: Date.now() });
+
     const decision = await opts.policy.decide({
       repoSlug,
       externalId: parsed.externalId,
@@ -81,11 +101,26 @@ export function buildVerifierApp(opts: VerifierServerOptions) {
       saltReveal: parsed.saltReveal,
     });
 
+    events.publish({
+      type: "verifier.reasoning",
+      claimId,
+      agentId: agentIdStr,
+      thinkingChunk: "",
+      final: { accept: decision.accept, reason: decision.reason },
+      ts: Date.now(),
+    });
+
     if (!decision.accept) {
+      events.publish({
+        type: "verifier.rejected",
+        claimId,
+        agentId: agentIdStr,
+        reason: decision.reason,
+        ts: Date.now(),
+      });
       return c.json({ accepted: false, reason: decision.reason }, 403);
     }
 
-    const claimId = deriveClaimId(parsed.repoId, parsed.externalId, parsed.kind);
     const attestation: Attestation = {
       claimId,
       recipient: parsed.recipient,
@@ -94,6 +129,13 @@ export function buildVerifierApp(opts: VerifierServerOptions) {
     };
 
     const signed = await signAttestation(opts.signer, attestation);
+    events.publish({
+      type: "verifier.signed",
+      claimId,
+      agentId: agentIdStr,
+      signature: signed.signature,
+      ts: Date.now(),
+    });
     return c.json(
       {
         accepted: true,

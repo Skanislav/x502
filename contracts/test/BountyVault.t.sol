@@ -123,7 +123,7 @@ contract BountyVaultTest is Test {
 
         // Build a duplicate payout call inline so vm.expectRevert anchors on vault.payout.
         bytes32 cid = Attestations.claimId(REPO_ID, 42, uint8(BountyVault.Kind.Fix));
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
         uint256 deadline = block.timestamp + 1 hours;
         Attestations.Attestation memory att = Attestations.Attestation({
             claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
@@ -175,7 +175,7 @@ contract BountyVaultTest is Test {
     function test_payout_revertsOnDuplicateSigners() public {
         uint256 externalId = 8;
         bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(BountyVault.Kind.Fix));
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
         factProvider.mockFulfill(cid, factBlob);
 
         uint256 deadline = block.timestamp + 1 hours;
@@ -206,7 +206,7 @@ contract BountyVaultTest is Test {
     function test_payout_revertsOnUntrustedSigner() public {
         uint256 externalId = 9;
         bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(BountyVault.Kind.Fix));
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
         factProvider.mockFulfill(cid, factBlob);
 
         uint256 untrustedId = 999;
@@ -241,7 +241,7 @@ contract BountyVaultTest is Test {
     function test_payout_revertsOnInvalidSignature() public {
         uint256 externalId = 10;
         bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(BountyVault.Kind.Fix));
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
         factProvider.mockFulfill(cid, factBlob);
 
         uint256 deadline = block.timestamp + 1 hours;
@@ -319,6 +319,108 @@ contract BountyVaultTest is Test {
         );
     }
 
+    function test_payout_revertsWhenFactStatusZero() public {
+        uint256 externalId = 15;
+        bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(BountyVault.Kind.Fix));
+        // status=0 simulates DON's source.js rejecting the kind-specific rules
+        // (e.g., PR not merged, body lacks "Fixes #N").
+        bytes memory factBlob = abi.encode(uint8(0), uint64(1), bytes32(0), claimant);
+        factProvider.mockFulfill(cid, factBlob);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        Attestations.Attestation memory att = Attestations.Attestation({
+            claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
+        });
+
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _sign(agentKeys[0], att);
+        sigs[1] = _sign(agentKeys[1], att);
+
+        vm.expectRevert(abi.encodeWithSelector(BountyVault.FactStatusNotOk.selector, uint8(0)));
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Fix,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
+    }
+
+    function test_payout_revertsWhenMergeMissingForFix() public {
+        uint256 externalId = 16;
+        bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(BountyVault.Kind.Fix));
+        // status=1 but mergedBlock=0 — should revert for Fix/DocsTests.
+        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        factProvider.mockFulfill(cid, factBlob);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        Attestations.Attestation memory att = Attestations.Attestation({
+            claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
+        });
+
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _sign(agentKeys[0], att);
+        sigs[1] = _sign(agentKeys[1], att);
+
+        vm.expectRevert(BountyVault.FactMergeMissing.selector);
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Fix,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
+    }
+
+    function test_payout_allowsZeroMergedBlockForReportKind() public {
+        // Kind.Report doesn't require a merge — mergedBlock=0 is valid.
+        uint256 externalId = 17;
+        bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(BountyVault.Kind.Report));
+        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        factProvider.mockFulfill(cid, factBlob);
+
+        uint256 deadline = block.timestamp + 1 hours;
+        Attestations.Attestation memory att = Attestations.Attestation({
+            claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
+        });
+
+        uint256[] memory ids = new uint256[](2);
+        ids[0] = agentIds[0];
+        ids[1] = agentIds[1];
+        bytes[] memory sigs = new bytes[](2);
+        sigs[0] = _sign(agentKeys[0], att);
+        sigs[1] = _sign(agentKeys[1], att);
+
+        uint256 priorClaimant = usdc.balanceOf(claimant);
+        vault.payout(
+            REPO_ID,
+            externalId,
+            BountyVault.Kind.Report,
+            claimant,
+            deadline,
+            keccak256(factBlob),
+            ids,
+            sigs
+        );
+        assertEq(
+            usdc.balanceOf(claimant) - priorClaimant,
+            defaultPrices.report - 2 * OUTCOME_FEE,
+            "report payout settled despite mergedBlock=0"
+        );
+    }
+
     // ---------- deadline ----------
 
     function test_payout_revertsAfterDeadline() public {
@@ -363,7 +465,7 @@ contract BountyVaultTest is Test {
 
         uint256 externalId = 14;
         bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(BountyVault.Kind.Fix));
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
         factProvider.mockFulfill(cid, factBlob);
 
         uint256 deadline = block.timestamp + 1 hours;
@@ -420,7 +522,7 @@ contract BountyVaultTest is Test {
 
     function _payFix(uint256 externalId) internal {
         bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(BountyVault.Kind.Fix));
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
         if (!_isReady(cid)) factProvider.mockFulfill(cid, factBlob);
 
         uint256 deadline = block.timestamp + 1 hours;

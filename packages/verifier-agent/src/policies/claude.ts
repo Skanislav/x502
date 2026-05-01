@@ -1,7 +1,14 @@
 import type Anthropic from "@anthropic-ai/sdk";
 import type { Octokit } from "@octokit/rest";
 
-import { Kind, KindName, deriveCommitment, repoIdFromSlug } from "@x502/shared";
+import {
+  type AgentRegistryClient,
+  Kind,
+  KindName,
+  deriveCommitment,
+  repoIdFromSlug,
+  resolveAgentWallet,
+} from "@x502/shared";
 
 import type { DecisionOutcome, DecisionPolicy, VerifyContext } from "../decide.js";
 
@@ -12,6 +19,12 @@ export interface ClaudePolicyOptions {
   maxTokens?: number;
   /// Effort level for the reasoning portion. medium balances cost and rigour.
   effort?: "low" | "medium" | "high" | "max";
+  /// When provided, the policy resolves `agentIdReveal` via the ERC-8004
+  /// IdentityRegistry and rejects (without calling Claude) if the bound wallet
+  /// does not match `recipient`, or if the body's `<!-- x502:WALLET -->`
+  /// marker disagrees. Without this option the policy stays in the legacy
+  /// commitment-hash-only mode so existing tests keep passing.
+  walletBinding?: AgentRegistryClient;
 }
 
 const SYSTEM_PROMPT = `You are an x502 verifier agent. You judge whether a claim about a GitHub
@@ -101,6 +114,11 @@ export class ClaudePolicy implements DecisionPolicy {
       return { accept: false, reason: `gh fetch failed: ${(e as Error).message}` };
     }
 
+    if (this.opts.walletBinding && ctx.agentIdReveal !== undefined) {
+      const binding = await this.verifyWalletBinding(ctx, body);
+      if (!binding.ok) return { accept: false, reason: binding.reason };
+    }
+
     const commitmentVerified = this.checkCommitment(ctx, body);
 
     return this.judge({
@@ -126,6 +144,38 @@ export class ClaudePolicy implements DecisionPolicy {
     ).toLowerCase();
     const m = body.match(/<!--\s*x502-commitment:(0x[a-fA-F0-9]{64})\s*-->/);
     return m?.[1]?.toLowerCase() === expected;
+  }
+
+  private async verifyWalletBinding(
+    ctx: VerifyContext,
+    body: string,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (!this.opts.walletBinding || ctx.agentIdReveal === undefined) {
+      return { ok: true };
+    }
+    let wallet: string;
+    try {
+      wallet = await resolveAgentWallet(this.opts.walletBinding, ctx.agentIdReveal);
+    } catch (e) {
+      return { ok: false, reason: `agent registry lookup failed: ${(e as Error).message}` };
+    }
+    if (wallet.toLowerCase() !== ctx.recipient.toLowerCase()) {
+      return {
+        ok: false,
+        reason: `recipient ${ctx.recipient} does not match agentId ${ctx.agentIdReveal} wallet ${wallet}`,
+      };
+    }
+    // The DON's source.js reads <!-- x502:0xADDRESS --> as ghAuthorBinding —
+    // when that marker is present it must match the resolved wallet. Missing
+    // marker is allowed (the commitment-hash check still binds via salt).
+    const m = body.match(/<!--\s*x502:(0x[a-fA-F0-9]{40})\s*-->/);
+    if (m?.[1] && m[1].toLowerCase() !== wallet.toLowerCase()) {
+      return {
+        ok: false,
+        reason: `x502 wallet marker ${m[1]} does not match agent wallet ${wallet}`,
+      };
+    }
+    return { ok: true };
   }
 
   private async judge(input: JudgmentInput): Promise<DecisionOutcome> {
