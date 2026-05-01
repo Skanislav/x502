@@ -18,9 +18,12 @@ import { privateKeyToAccount } from "viem/accounts";
 ///
 /// Shape notes for the eventual remote implementation:
 ///   - `kind = "smart"` returns ERC-1271 signatures from `signTypedData`. The
-///     vault's current `ECDSA.recover` check rejects those — switch to
-///     OZ `SignatureChecker.isValidSignatureNow` before turning on smart-account
-///     verifier signers in production.
+///     vault accepts these via `SignatureChecker.isValidSignatureNow`.
+///   - For undeployed (counterfactual) smart accounts, wrap the inner ERC-1271
+///     sig with the EIP-6492 magic suffix:
+///         `abi.encode(factory, factoryCalldata, innerSig) || 0x6492…6492`
+///     The vault's `ERC6492SignatureChecker` deploys via the factory then
+///     verifies — first claim from a fresh wallet "just works".
 ///   - `signTransaction` returns a fully signed raw tx. Smart-account mode
 ///     should reject this and expose `sendUserOperation` instead (TODO).
 
