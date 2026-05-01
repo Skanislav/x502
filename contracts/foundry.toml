@@ -14,7 +14,10 @@ via_ir = false
 # same bytes the committed abis.ts has).
 bytecode_hash = "none"
 cbor_metadata = false
-fs_permissions = [{ access = "read", path = "./" }]
+fs_permissions = [
+  { access = "read", path = "./" },
+  { access = "read", path = "../chainlink/source.js" },
+]
 
 [fmt]
 line_length = 100

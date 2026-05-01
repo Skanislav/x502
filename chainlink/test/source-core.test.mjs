@@ -1,8 +1,13 @@
+import { decodeAbiParameters, parseAbiParameters } from "viem";
 import { describe, expect, it } from "vitest";
 
+import { readFileSync } from "node:fs";
 import {
   authorBindingFromBody,
   decideFact,
+  encodeFact,
+  githubHeaders,
+  hexToBytes,
   mergedBlockFromSha,
   parseRepoSlug,
 } from "../source-core.js";
@@ -108,5 +113,61 @@ describe("source core", () => {
 
   it("throws for unknown kinds", () => {
     expect(() => decideFact({ kind: 9, item: {} })).toThrow("unknown kind 9");
+  });
+
+  it("ABI-encodes facts without relying on ethers in the DON runtime", () => {
+    const fact = {
+      status: 1,
+      mergedBlock: 0xabcdef1234567890n,
+      labelMask: b32("5"),
+      ghAuthorBinding: "0x1234567890abcdef1234567890abcdef12345678",
+    };
+    const encoded = encodeFact(fact);
+
+    expect(encoded).toBe(
+      `0x${[
+        "1".padStart(64, "0"),
+        "abcdef1234567890".padStart(64, "0"),
+        "5".padStart(64, "0"),
+        "1234567890abcdef1234567890abcdef12345678".padStart(64, "0"),
+      ].join("")}`,
+    );
+    const decoded = decodeAbiParameters(
+      parseAbiParameters("uint8, uint64, bytes32, address"),
+      encoded,
+    );
+    expect(decoded[0]).toBe(1);
+    expect(decoded[1]).toBe(0xabcdef1234567890n);
+    expect(decoded[2]).toBe(b32("5"));
+    expect(decoded[3].toLowerCase()).toBe("0x1234567890abcdef1234567890abcdef12345678");
+  });
+
+  it("rejects shortened bytes32 values instead of guessing padding", () => {
+    expect(() =>
+      encodeFact({
+        status: 1,
+        mergedBlock: 0n,
+        labelMask: "0x5",
+        ghAuthorBinding: ZERO_ADDR,
+      }),
+    ).toThrow("bytes32 must be 64 hex chars");
+  });
+
+  it("converts validated hex strings to bytes", () => {
+    expect(Array.from(hexToBytes("0x0001abff"))).toEqual([0, 1, 171, 255]);
+    expect(() => hexToBytes("0xzz")).toThrow("invalid hex");
+  });
+
+  it("builds a self-contained DON source without external ethers imports", () => {
+    const source = readFileSync(new URL("../source.js", import.meta.url), "utf8");
+
+    expect(source).not.toContain("https://esm.sh/ethers");
+    expect(source).not.toContain("ethers.");
+  });
+
+  it("omits GitHub authorization when no PAT secret is configured", () => {
+    expect(githubHeaders(undefined)).not.toHaveProperty("Authorization");
+    expect(githubHeaders("")).not.toHaveProperty("Authorization");
+    expect(githubHeaders("gh-test").Authorization).toBe("Bearer gh-test");
   });
 });
