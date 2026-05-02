@@ -96,6 +96,7 @@ contract BountyVault is ReentrancyGuard {
     error FactHashMismatch();
     error FactStatusNotOk(uint8 status);
     error FactMergeMissing();
+    error RecipientNotBound(address recipient, address bound);
     error InsufficientRepoBalance();
     error ThresholdZero();
     error PriceUnderflow();
@@ -190,6 +191,14 @@ contract BountyVault is ReentrancyGuard {
         if ((kind == Kind.Fix || kind == Kind.DocsTests) && fb.mergedBlock == 0) {
             revert FactMergeMissing();
         }
+        // Bind payout recipient to the wallet committed in the GH issue/PR
+        // body (`<!-- x502:0xWALLET -->`). The fact oracle parses this into
+        // `ghAuthorBinding`. Without this check, `payout` is permissionless
+        // and a bystander observing threshold UIDs could submit with their
+        // own recipient and steal the bounty.
+        if (recipient == address(0) || recipient != fb.ghAuthorBinding) {
+            revert RecipientNotBound(recipient, fb.ghAuthorBinding);
+        }
 
         // Validate each attestation (schema, revocation, claim/fact binding,
         // trust, dedup) and collect attester addresses for outcome fees.
@@ -259,11 +268,7 @@ contract BountyVault is ReentrancyGuard {
         }
     }
 
-    function _resolveTrustedSet(RepoConfig storage cfg)
-        internal
-        view
-        returns (address[] memory)
-    {
+    function _resolveTrustedSet(RepoConfig storage cfg) internal view returns (address[] memory) {
         uint256 n = cfg.trustedAgents.length;
         address[] memory addrs = new address[](n);
         for (uint256 i; i < n; ++i) {

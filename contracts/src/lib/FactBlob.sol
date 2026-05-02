@@ -17,10 +17,7 @@ library FactBlob {
         (uint8 status, uint64 mergedBlock, bytes32 labelMask, address binding) =
             abi.decode(blob, (uint8, uint64, bytes32, address));
         return Fact({
-            status: status,
-            mergedBlock: mergedBlock,
-            labelMask: labelMask,
-            ghAuthorBinding: binding
+            status: status, mergedBlock: mergedBlock, labelMask: labelMask, ghAuthorBinding: binding
         });
     }
 }
