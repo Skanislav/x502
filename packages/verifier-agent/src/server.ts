@@ -99,8 +99,21 @@ export function buildVerifierApp(opts: VerifierServerOptions) {
       factHash: parsed.factHash,
       agentIdReveal: parsed.agentIdReveal,
       saltReveal: parsed.saltReveal,
+      // Per-token streaming sink. ClaudePolicy fires this for every
+      // thinking_delta from extended-thinking; AcceptAll/RejectAll ignore it.
+      onReasoningChunk: (chunk) => {
+        events.publish({
+          type: "verifier.reasoning",
+          claimId,
+          agentId: agentIdStr,
+          thinkingChunk: chunk,
+          ts: Date.now(),
+        });
+      },
     });
 
+    // Final decision marker — empty chunk + `final` field tells the UI to
+    // stop spinning and render the verdict alongside the accumulated chain.
     events.publish({
       type: "verifier.reasoning",
       claimId,
