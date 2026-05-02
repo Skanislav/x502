@@ -44,15 +44,19 @@ async function waitFor(rpcUrl: string, timeoutMs: number): Promise<void> {
 }
 
 export async function startAnvil(
-  opts: { port?: number; logFile?: string } = {},
+  opts: { port?: number; logFile?: string; forkUrl?: string } = {},
 ): Promise<AnvilHandle> {
   const port = opts.port ?? (await freePort());
   const rpcUrl = `http://127.0.0.1:${port}`;
-  const child: ChildProcess = spawn(
-    "anvil",
-    ["--port", String(port), "--silent", "--block-time", "1"],
-    { stdio: ["ignore", "pipe", "pipe"] },
-  );
+  const args = ["--port", String(port), "--silent", "--block-time", "1"];
+  if (opts.forkUrl) {
+    // Fork mode: anvil reads state from the live RPC, so contracts that
+    // exist on the source chain (USDC, EAS, SchemaRegistry) are reachable
+    // at their real addresses. Default chainId stays at 31337 so existing
+    // viem chains map correctly; pass --chain-id to override.
+    args.push("--fork-url", opts.forkUrl);
+  }
+  const child: ChildProcess = spawn("anvil", args, { stdio: ["ignore", "pipe", "pipe"] });
 
   let stderrBuf = "";
   child.stderr?.on("data", (d) => {
