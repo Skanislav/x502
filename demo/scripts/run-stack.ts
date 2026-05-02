@@ -99,11 +99,17 @@ async function main() {
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
 
-  // 1) anvil
-  process.stdout.write("[run-stack] starting anvil on :8545\n");
+  // 1) anvil. When BASE_SEPOLIA_RPC_URL is set, run as a fork — real EAS +
+  // SchemaRegistry predeploys are reachable so the demo exercises the same
+  // EAS contracts production uses.
+  const forkUrl = process.env.BASE_SEPOLIA_RPC_URL;
+  process.stdout.write(
+    `[run-stack] starting anvil on :8545${forkUrl ? ` (fork=${truncate(forkUrl)})` : ""}\n`,
+  );
   const anvil = await startAnvil({
     port: 8545,
     logFile: resolve(RUNTIME_DIR, "logs", "anvil.log"),
+    forkUrl,
   });
   procs.push({ name: "anvil", child: anvil.child });
   if (anvil.child.stdout) {
@@ -116,21 +122,19 @@ async function main() {
   process.stdout.write("[run-stack] seeding contracts + repo config\n");
   await new Promise<void>((res, rej) => {
     const seedLog = openSync(resolve(RUNTIME_DIR, "logs", "seed.log"), "a");
-    const c = spawn(
-      "pnpm",
-      [
-        "exec",
-        "tsx",
-        "demo/scripts/seed.ts",
-        "--rpc-url",
-        anvil.rpcUrl,
-        "--coordinator-port",
-        String(COORDINATOR_PORT),
-        "--web-port",
-        String(WEB_PORT),
-      ],
-      { cwd: REPO_ROOT, stdio: ["ignore", seedLog, seedLog] },
-    );
+    const seedArgs = [
+      "exec",
+      "tsx",
+      "demo/scripts/seed.ts",
+      "--rpc-url",
+      anvil.rpcUrl,
+      "--coordinator-port",
+      String(COORDINATOR_PORT),
+      "--web-port",
+      String(WEB_PORT),
+    ];
+    if (forkUrl) seedArgs.push("--fork");
+    const c = spawn("pnpm", seedArgs, { cwd: REPO_ROOT, stdio: ["ignore", seedLog, seedLog] });
     c.on("exit", (code) => (code === 0 ? res() : rej(new Error(`seed exited ${code}`))));
   });
   const rt = readRuntime();
@@ -228,6 +232,10 @@ function writeSkillEnvScript(rt: ReturnType<typeof readRuntime>): void {
   }
   const fs = require("node:fs") as typeof import("node:fs");
   fs.writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o755 });
+}
+
+function truncate(s: string, max = 40): string {
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
 }
 
 main().catch((e) => {

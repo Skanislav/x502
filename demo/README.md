@@ -20,22 +20,67 @@ Each defect has a configured price on the `BountyVault` contract:
 | `fix`        | 50 USDC            |
 | `docs_tests` | 30 USDC            |
 
-Verifier outcome fee (per signing agent, deducted from the bounty) is **0.10
-USDC**.
+Verifier outcome fee (per attesting agent, deducted from the bounty) is
+**0.10 USDC**.
 
-## Demo flow
+## Run it locally
 
-Pre-seed:
-1. Repo owner runs `forge script Deploy.s.sol` — deploys `BountyVault` +
-   `GitHubFactReceiver` on Base Sepolia. (`.env.example` lists the required
-   variables.)
-2. Repo owner calls `BountyVault.configureRepo` for `skanislav/x502` with the
+```sh
+pnpm demo                              # boots anvil + seed + coordinator + web
+source demo/scripts/skill-env.sh       # exports VERIFIER_<id>_PRIVATE_KEY + X502_*
+claude                                 # opens Claude Code
+> /x502-verify as agent 101            # publishes an EAS attestation
+> /x502-verify as agent 102            # second attestation → vault settles
+```
+
+`pnpm demo` boots:
+- **anvil** (local chain, port 8545; pass `BASE_SEPOLIA_RPC_URL` to fork)
+- **seed.ts** deploys mocks + MockEAS, registers the x502 schema, configures
+  `skanislav/x502` with three trusted verifier wallets
+- **coordinator** waits for claims; subscribes to EAS for matching attestations
+- **auto-fulfill watcher** simulates the Chainlink Functions DON
+- **Next.js web** at `http://127.0.0.1:3000/?mode=demo`
+
+There are no long-running verifier processes any more. Each verifier identity
+is a human running `/x502-verify` in their own Claude Code session — the
+skill (`.claude/skills/x502-verify/SKILL.md`) applies the rubric and calls
+`EAS.attest` via `demo/scripts/x502.ts`.
+
+### Fork mode (real EAS contracts)
+
+Set `BASE_SEPOLIA_RPC_URL` before `pnpm demo` and anvil starts as a fork:
+
+```sh
+BASE_SEPOLIA_RPC_URL=https://sepolia.base.org pnpm demo
+```
+
+The real EAS predeploy at `0x4200000000000000000000000000000000000021`
+and SchemaRegistry at `0x4200000000000000000000000000000000000020` are
+reachable; seed registers the x502 schema (idempotent) and uses the
+resulting UID for the vault. Attestations from `/x502-verify` are real
+on-chain EAS attestations under the same schema production uses.
+
+## Production deploy
+
+Pre-seed (Base Sepolia):
+1. **Register the x502 schema** in EAS — once per chain.
+   ```sh
+   tsx demo/scripts/eas-register.ts \
+     --rpc $BASE_SEPOLIA_RPC_URL --scope-id DEPLOYER_PRIVATE_KEY
+   ```
+   Prints `{ uid }`. Capture it for the next step.
+
+2. **Deploy the vault + fact receiver.**
+   ```sh
+   X502_SCHEMA_UID=0x... forge script script/Deploy.s.sol \
+     --rpc-url $BASE_SEPOLIA_RPC_URL --broadcast --verify
+   ```
+3. Repo owner calls `BountyVault.configureRepo` for `skanislav/x502` with the
    trusted ERC-8004 agent IDs and the per-kind prices above, then deposits
    USDC.
-3. Three verifier-agents are running, each holding the signing wallet for one
-   of the trusted agent IDs (registered on the canonical ERC-8004 IdentityRegistry).
-4. The coordinator is running with the vault address + verifier endpoints
-   in its config.
+4. Verifier identities (the wallets registered in ERC-8004) are humans
+   driving `/x502-verify`. The coordinator runs with the vault + EAS +
+   schema env vars and submits payouts as attestations come in.
 
 Then, for each kind:
 
