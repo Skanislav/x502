@@ -5,46 +5,50 @@ import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import {BountyVault} from "../src/BountyVault.sol";
+import {AttestationRequest, AttestationRequestData, IEAS} from "../src/interfaces/IEAS.sol";
 import {Attestations} from "../src/lib/Attestations.sol";
-import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 import {MockAgentRegistry} from "../src/mocks/MockAgentRegistry.sol";
+import {MockEAS} from "../src/mocks/MockEAS.sol";
 import {MockGitHubFactProvider} from "../src/mocks/MockGitHubFactProvider.sol";
+import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 
-/// Edge cases on top of BountyVault.t.sol — paid-event emission shape,
-/// all-N-of-N signing, and cross-repo collision protection.
+/// Edge cases on top of BountyVault.t.sol — all-N attestations,
+/// Paid-event emission shape, cross-repo + cross-kind collision protection,
+/// and repo lifecycle edges. Same EAS-driven settlement model.
 contract BountyVaultEdgesTest is Test {
     BountyVault internal vault;
     MockUSDC internal usdc;
     MockAgentRegistry internal registry;
     MockGitHubFactProvider internal factProvider;
+    MockEAS internal eas;
 
     address internal claimant = makeAddr("claimant");
     address internal otherClaimant = makeAddr("otherClaimant");
 
     uint256 internal constant N_AGENTS = 3;
     uint256[] internal agentIds;
-    uint256[] internal agentKeys;
     address[] internal agentWallets;
 
     bytes32 internal constant REPO_A = keccak256("github.com/owner/repo-a");
     bytes32 internal constant REPO_B = keccak256("github.com/owner/repo-b");
+    bytes32 internal constant SCHEMA_UID = keccak256("x502:bytes32 claimId,bytes32 factHash,bool accept");
     uint256 internal constant DEPOSIT = 1_000_000_000;
     uint256 internal constant OUTCOME_FEE = 100_000;
 
     BountyVault.Prices internal prices = BountyVault.Prices({
-        report: 5_000_000, triage: 2_000_000, fix: 50_000_000, docsTests: 30_000_000
+        report: 5_000_000,
+        triage: 2_000_000,
+        fix: 50_000_000,
+        docsTests: 30_000_000
     });
 
-    /// Re-declare the vault's events at the test-contract level so vm.expectEmit
-    /// can match them — solc requires the typed selector come from a contract
-    /// that declares it.
     event Paid(
         bytes32 indexed claimId,
         bytes32 indexed repoId,
         BountyVault.Kind kind,
         address recipient,
         uint256 amount,
-        uint256[] agentIds
+        address[] attesters
     );
 
     event Withdrawn(bytes32 indexed repoId, address indexed to, uint256 amount);
@@ -53,51 +57,43 @@ contract BountyVaultEdgesTest is Test {
         usdc = new MockUSDC();
         registry = new MockAgentRegistry();
         factProvider = new MockGitHubFactProvider();
-        vault = new BountyVault(IERC20(address(usdc)), registry, factProvider);
+        eas = new MockEAS();
+        vault = new BountyVault(
+            IERC20(address(usdc)), registry, factProvider, IEAS(address(eas)), SCHEMA_UID
+        );
 
         agentIds = new uint256[](N_AGENTS);
-        agentKeys = new uint256[](N_AGENTS);
         agentWallets = new address[](N_AGENTS);
         for (uint256 i; i < N_AGENTS; ++i) {
-            (address w, uint256 k) = makeAddrAndKey(string.concat("agent", vm.toString(i)));
+            address w = makeAddr(string.concat("agent", vm.toString(i)));
             agentIds[i] = 200 + i;
-            agentKeys[i] = k;
             agentWallets[i] = w;
             registry.setAgentWallet(agentIds[i], w);
         }
 
-        // Two repos owned by separate addresses; each funded with $1000.
         _configureAndFund(REPO_A, makeAddr("ownerA"));
         _configureAndFund(REPO_B, makeAddr("ownerB"));
     }
 
-    // ---------- payment math: all-N-of-N sign ----------
+    // ---------- payment math: all-N-of-N attestations ----------
 
-    function test_payout_allNSign_paysEveryVerifier() public {
+    function test_payout_allNAttestations_paysEveryAttester() public {
         uint256 externalId = 1;
-        BountyVault.Kind kind = BountyVault.Kind.Fix;
-        bytes32 cid = Attestations.claimId(REPO_A, externalId, uint8(kind));
-
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        bytes32 cid = Attestations.claimId(REPO_A, externalId, uint8(BountyVault.Kind.Fix));
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
         factProvider.mockFulfill(cid, factBlob);
-
+        bytes32 factHash = keccak256(factBlob);
         uint256 deadline = block.timestamp + 1 hours;
-        Attestations.Attestation memory att = Attestations.Attestation({
-            claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
-        });
 
-        bytes[] memory sigs = new bytes[](N_AGENTS);
+        bytes32[] memory uids = new bytes32[](N_AGENTS);
         for (uint256 i; i < N_AGENTS; ++i) {
-            sigs[i] = _sign(agentKeys[i], att);
+            uids[i] = _attest(agentWallets[i], cid, factHash, true);
         }
 
-        vault.payout(
-            REPO_A, externalId, kind, claimant, deadline, keccak256(factBlob), agentIds, sigs
-        );
+        vault.payout(REPO_A, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, uids);
 
-        // Every verifier got their fee
         for (uint256 i; i < N_AGENTS; ++i) {
-            assertEq(usdc.balanceOf(agentWallets[i]), OUTCOME_FEE, "all verifiers paid");
+            assertEq(usdc.balanceOf(agentWallets[i]), OUTCOME_FEE, "all attesters paid");
         }
         assertEq(
             usdc.balanceOf(claimant),
@@ -110,34 +106,35 @@ contract BountyVaultEdgesTest is Test {
 
     function test_payout_emitsPaidEvent() public {
         uint256 externalId = 2;
-        BountyVault.Kind kind = BountyVault.Kind.Fix;
-        bytes32 cid = Attestations.claimId(REPO_A, externalId, uint8(kind));
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        bytes32 cid = Attestations.claimId(REPO_A, externalId, uint8(BountyVault.Kind.Fix));
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
         factProvider.mockFulfill(cid, factBlob);
-
+        bytes32 factHash = keccak256(factBlob);
         uint256 deadline = block.timestamp + 1 hours;
-        Attestations.Attestation memory att = Attestations.Attestation({
-            claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
-        });
-        uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0];
-        ids[1] = agentIds[1];
-        bytes[] memory sigs = new bytes[](2);
-        sigs[0] = _sign(agentKeys[0], att);
-        sigs[1] = _sign(agentKeys[1], att);
+
+        bytes32[] memory uids = new bytes32[](2);
+        uids[0] = _attest(agentWallets[0], cid, factHash, true);
+        uids[1] = _attest(agentWallets[1], cid, factHash, true);
+
+        address[] memory expectedAttesters = new address[](2);
+        expectedAttesters[0] = agentWallets[0];
+        expectedAttesters[1] = agentWallets[1];
 
         vm.expectEmit(true, true, false, true, address(vault));
-        emit Paid(cid, REPO_A, kind, claimant, prices.fix - 2 * OUTCOME_FEE, ids);
-
-        vault.payout(REPO_A, externalId, kind, claimant, deadline, keccak256(factBlob), ids, sigs);
+        emit Paid(
+            cid,
+            REPO_A,
+            BountyVault.Kind.Fix,
+            claimant,
+            prices.fix - 2 * OUTCOME_FEE,
+            expectedAttesters
+        );
+        vault.payout(REPO_A, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, uids);
     }
 
     // ---------- cross-repo collision protection ----------
 
     function test_sameExternalIdAndKind_acrossRepos_doesNotCollide() public {
-        // Same externalId + kind in two different repos must produce different
-        // claimIds (because repoId is part of the hash) and thus not trip the
-        // one-shot fuse on the second payout.
         uint256 externalId = 99;
         BountyVault.Kind kind = BountyVault.Kind.Fix;
 
@@ -154,11 +151,7 @@ contract BountyVaultEdgesTest is Test {
         assertEq(usdc.balanceOf(otherClaimant), prices.fix - 2 * OUTCOME_FEE);
     }
 
-    // ---------- claimId derivation: kind isolation ----------
-
     function test_sameExternalIdDifferentKind_doesNotCollide() public {
-        // Same repo + same externalId, different kinds → different claimIds,
-        // both can be paid.
         uint256 externalId = 7;
         bytes32 cidFix = Attestations.claimId(REPO_A, externalId, uint8(BountyVault.Kind.Fix));
         bytes32 cidDocs =
@@ -218,53 +211,6 @@ contract BountyVaultEdgesTest is Test {
         assertEq(usdc.balanceOf(ownerA), amount);
     }
 
-    // ---------- payout edges ----------
-
-    // Current behavior pinned from USER_FLOW.md "Current vs. intent":
-    // the vault checks keccak256(factBlob) == factHash and verifier signatures,
-    // but it does not decode or enforce factBlob.status == 1.
-    function test_currentBehavior_payoutAcceptsStatusZero() public {
-        uint256 externalId = 500;
-        BountyVault.Kind kind = BountyVault.Kind.Fix;
-        bytes32 cid = Attestations.claimId(REPO_A, externalId, uint8(kind));
-        bytes memory factBlob = abi.encode(uint8(0), uint64(0), bytes32(0), claimant);
-        factProvider.mockFulfill(cid, factBlob);
-
-        uint256 deadline = block.timestamp + 1 hours;
-        Attestations.Attestation memory att = Attestations.Attestation({
-            claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
-        });
-        uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0];
-        ids[1] = agentIds[1];
-        bytes[] memory sigs = new bytes[](2);
-        sigs[0] = _sign(agentKeys[0], att);
-        sigs[1] = _sign(agentKeys[1], att);
-
-        vault.payout(REPO_A, externalId, kind, claimant, deadline, keccak256(factBlob), ids, sigs);
-
-        assertTrue(vault.isPaid(cid));
-    }
-
-    function test_payout_revertsOnLengthMismatch() public {
-        uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0];
-        ids[1] = agentIds[1];
-        bytes[] memory sigs = new bytes[](1);
-
-        vm.expectRevert(BountyVault.LengthMismatch.selector);
-        vault.payout(
-            REPO_A,
-            501,
-            BountyVault.Kind.Fix,
-            claimant,
-            block.timestamp + 1 hours,
-            bytes32(0),
-            ids,
-            sigs
-        );
-    }
-
     function test_payout_revertsOnPriceUnderflow() public {
         BountyVault.Prices memory lowPrices =
             BountyVault.Prices({report: 1, triage: 1, fix: OUTCOME_FEE * 2, docsTests: 1});
@@ -273,32 +219,26 @@ contract BountyVaultEdgesTest is Test {
         vault.configureRepo(REPO_A, agentIds, 2, lowPrices, OUTCOME_FEE);
 
         uint256 externalId = 502;
-        BountyVault.Kind kind = BountyVault.Kind.Fix;
-        bytes32 cid = Attestations.claimId(REPO_A, externalId, uint8(kind));
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), claimant);
+        bytes32 cid = Attestations.claimId(REPO_A, externalId, uint8(BountyVault.Kind.Fix));
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
         factProvider.mockFulfill(cid, factBlob);
-
+        bytes32 factHash = keccak256(factBlob);
         uint256 deadline = block.timestamp + 1 hours;
-        Attestations.Attestation memory att = Attestations.Attestation({
-            claimId: cid, recipient: claimant, deadline: deadline, factHash: keccak256(factBlob)
-        });
-        uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0];
-        ids[1] = agentIds[1];
-        bytes[] memory sigs = new bytes[](2);
-        sigs[0] = _sign(agentKeys[0], att);
-        sigs[1] = _sign(agentKeys[1], att);
+
+        bytes32[] memory uids = new bytes32[](2);
+        uids[0] = _attest(agentWallets[0], cid, factHash, true);
+        uids[1] = _attest(agentWallets[1], cid, factHash, true);
 
         vm.expectRevert(BountyVault.PriceUnderflow.selector);
-        vault.payout(REPO_A, externalId, kind, claimant, deadline, keccak256(factBlob), ids, sigs);
+        vault.payout(REPO_A, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, uids);
     }
 
     // ---------- views ----------
 
-    function test_views_coverRepoConfigAndDomainSeparator() public view {
+    function test_views_coverRepoConfigAndSchema() public view {
         assertEq(vault.thresholdOf(REPO_A), 2);
         assertEq(vault.outcomeFeeOf(REPO_A), OUTCOME_FEE);
-        assertTrue(vault.domainSeparator() != bytes32(0));
+        assertEq(vault.schemaUID(), SCHEMA_UID);
 
         uint256[] memory trustedAgents = vault.trustedAgentsOf(REPO_A);
         assertEq(trustedAgents.length, agentIds.length);
@@ -336,32 +276,35 @@ contract BountyVaultEdgesTest is Test {
         address recipient
     ) internal {
         bytes32 cid = Attestations.claimId(repoId, externalId, uint8(kind));
-        bytes memory factBlob = abi.encode(uint8(1), uint64(0), bytes32(0), recipient);
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), recipient);
         if (!_isReady(cid)) factProvider.mockFulfill(cid, factBlob);
+        bytes32 factHash = keccak256(factBlob);
         uint256 deadline = block.timestamp + 1 hours;
-        Attestations.Attestation memory att = Attestations.Attestation({
-            claimId: cid, recipient: recipient, deadline: deadline, factHash: keccak256(factBlob)
-        });
-        uint256[] memory ids = new uint256[](2);
-        ids[0] = agentIds[0];
-        ids[1] = agentIds[1];
-        bytes[] memory sigs = new bytes[](2);
-        sigs[0] = _sign(agentKeys[0], att);
-        sigs[1] = _sign(agentKeys[1], att);
-        vault.payout(repoId, externalId, kind, recipient, deadline, keccak256(factBlob), ids, sigs);
+
+        bytes32[] memory uids = new bytes32[](2);
+        uids[0] = _attest(agentWallets[0], cid, factHash, true);
+        uids[1] = _attest(agentWallets[1], cid, factHash, true);
+        vault.payout(repoId, externalId, kind, recipient, deadline, factHash, uids);
     }
 
     function _isReady(bytes32 cid) internal view returns (bool ready) {
         (ready,) = factProvider.getFact(cid);
     }
 
-    function _sign(uint256 key, Attestations.Attestation memory att)
+    function _attest(address attester, bytes32 cid, bytes32 factHash, bool accept)
         internal
-        view
-        returns (bytes memory)
+        returns (bytes32 uid)
     {
-        bytes32 digest = vault.hashAttestation(att);
-        (uint8 v, bytes32 r, bytes32 s) = vm.sign(key, digest);
-        return abi.encodePacked(r, s, v);
+        AttestationRequestData memory data = AttestationRequestData({
+            recipient: address(0),
+            expirationTime: 0,
+            revocable: true,
+            refUID: bytes32(0),
+            data: abi.encode(cid, factHash, accept),
+            value: 0
+        });
+        AttestationRequest memory req = AttestationRequest({schema: SCHEMA_UID, data: data});
+        vm.prank(attester);
+        uid = eas.attest(req);
     }
 }

@@ -19,11 +19,10 @@ const sources = {
   mockAgentRegistry: "MockAgentRegistry.sol/MockAgentRegistry.json",
   mockGitHubFactProvider: "MockGitHubFactProvider.sol/MockGitHubFactProvider.json",
   mockFunctionsRouter: "MockFunctionsRouter.sol/MockFunctionsRouter.json",
-  // Smart-wallet mocks for the demo's ERC-6492 end-to-end story. The factory
-  // is deployed by `demo/scripts/seed.ts` when DEMO_SMART_WALLET=1 so the
-  // x502-verify skill helper can produce 6492-wrapped signatures.
-  mockSmartWallet: "MockSmartWallet.sol/MockSmartWallet.json",
-  mockSmartWalletFactory: "MockSmartWalletFactory.sol/MockSmartWalletFactory.json",
+  // MockEAS — used by the local demo when anvil is NOT running as a fork of
+  // Base Sepolia. Implements the same IEAS interface BountyVault calls in
+  // production so the demo can exercise the full settlement path.
+  mockEAS: "MockEAS.sol/MockEAS.json",
 } as const;
 
 const lines: string[] = [

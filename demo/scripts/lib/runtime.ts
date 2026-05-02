@@ -8,44 +8,35 @@ import type { Address, Hex } from "viem";
 export interface DemoRuntime {
   rpcUrl: string;
   chainId: number;
-  /// Anvil prefunded key (deployer + repo owner + coordinator).
+  /// Anvil prefunded key (deployer + repo owner).
   deployerKey: Hex;
   contracts: {
     usdc: Address;
     registry: Address;
     factProvider: Address;
     vault: Address;
+    /// EAS contract — MockEAS in plain anvil mode, the real predeploy
+    /// (0x4200…0021) when anvil is forking Base Sepolia.
+    eas: Address;
   };
+  /// Schema UID under which verifiers attest. The vault rejects attestations
+  /// from any other schema.
+  schemaUID: Hex;
   repo: {
     slug: string;
     repoId: Hex;
     threshold: number;
-    trustedAgentIds: string[]; // bigints serialized
+    trustedAgentIds: string[];
   };
   verifiers: Array<{
-    agentId: string; // bigint serialized
+    agentId: string;
     privateKey: Hex;
-    /// On-chain identity registered in the AgentRegistry. For smart-wallet
-    /// verifiers this is the predicted CREATE2 address (the wallet may not
-    /// be deployed yet — vault deploys it on the first 6492-wrapped sig).
     address: Address;
     endpoint: string;
     port: number;
-    /// When set, this verifier is a smart-account signer. Run-stack passes
-    /// these to the verifier process as `VERIFIER_SMART_WALLET_*` env vars
-    /// so signAttestation produces ERC-6492 wrapped sigs.
-    smartWallet?: {
-      address: Address;
-      ownerAddress: Address;
-      factory: Address;
-      factoryCalldata: Hex;
-    };
   }>;
   coordinator: { endpoint: string; port: number };
   web: { port: number };
-  /// Optional factory address — only present when `DEMO_SMART_WALLET=1` was
-  /// set during seed. Useful for the web UI / debugging.
-  smartWalletFactory?: Address;
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
