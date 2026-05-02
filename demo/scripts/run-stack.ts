@@ -12,7 +12,7 @@
 /// demo/.runtime/logs/<name>.log. Ctrl-C tears everything down.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, openSync } from "node:fs";
+import { createWriteStream, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -180,7 +180,7 @@ async function main() {
     process.stdout.write(`[run-stack] starting web on :${rt.web.port}\n`);
     const web = spawnPnpm(
       "web",
-      ["--filter", "@x502/web", "dev", "--", "-p", String(rt.web.port)],
+      ["--filter", "@x502/web", "exec", "next", "dev", "-p", String(rt.web.port)],
       {
         NEXT_PUBLIC_COORDINATOR_URL: rt.coordinator.endpoint,
         NEXT_PUBLIC_DEMO_RUNTIME: "1",
@@ -230,8 +230,7 @@ function writeSkillEnvScript(rt: ReturnType<typeof readRuntime>): void {
   for (const v of rt.verifiers) {
     lines.push(`export VERIFIER_${v.agentId}_PRIVATE_KEY=${v.privateKey}`);
   }
-  const fs = require("node:fs") as typeof import("node:fs");
-  fs.writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o755 });
+  writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o755 });
 }
 
 function truncate(s: string, max = 40): string {
