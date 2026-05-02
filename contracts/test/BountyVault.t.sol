@@ -33,15 +33,13 @@ contract BountyVaultTest is Test {
     address[] internal agentWallets;
 
     bytes32 internal constant REPO_ID = keccak256("github.com/x502-protocol/demo");
-    bytes32 internal constant SCHEMA_UID = keccak256("x502:bytes32 claimId,bytes32 factHash,bool accept");
+    bytes32 internal constant SCHEMA_UID =
+        keccak256("x502:bytes32 claimId,bytes32 factHash,bool accept");
     uint256 internal constant DEPOSIT = 1_000_000_000;
     uint256 internal constant OUTCOME_FEE = 100_000;
 
     BountyVault.Prices internal defaultPrices = BountyVault.Prices({
-        report: 5_000_000,
-        triage: 2_000_000,
-        fix: 50_000_000,
-        docsTests: 30_000_000
+        report: 5_000_000, triage: 2_000_000, fix: 50_000_000, docsTests: 30_000_000
     });
 
     function setUp() public {
@@ -148,9 +146,7 @@ contract BountyVaultTest is Test {
         uids2[1] = _attest(agentWallets[1], cid, factHash, true);
 
         vm.expectRevert(abi.encodeWithSelector(BountyVault.AlreadyPaid.selector, cid));
-        vault.payout(
-            REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, uids2
-        );
+        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, uids2);
     }
 
     function test_payout_revertsOnDuplicateAttester() public {
@@ -383,7 +379,9 @@ contract BountyVaultTest is Test {
         uids[1] = _attest(agentWallets[1], cid, factHash, true);
 
         uint256 priorClaimant = usdc.balanceOf(claimant);
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Report, claimant, deadline, factHash, uids);
+        vault.payout(
+            REPO_ID, externalId, BountyVault.Kind.Report, claimant, deadline, factHash, uids
+        );
         assertEq(
             usdc.balanceOf(claimant) - priorClaimant,
             defaultPrices.report - 2 * OUTCOME_FEE,
@@ -462,6 +460,55 @@ contract BountyVaultTest is Test {
         vm.prank(stranger);
         vm.expectRevert(BountyVault.NotRepoOwner.selector);
         vault.withdraw(REPO_ID, 1);
+    }
+
+    // ---------- recipient binding ----------
+
+    /// @notice The fact's `ghAuthorBinding` is the wallet committed to in the
+    ///         GH issue body (`<!-- x502:0xWALLET -->`). Because `payout` is
+    ///         permissionless, anyone with threshold UIDs would otherwise be
+    ///         able to call it with their own recipient and steal the bounty.
+    ///         The vault must reject any caller-supplied recipient that
+    ///         doesn't match the binding.
+    function test_payout_revertsWhenRecipientDiffersFromAuthorBinding() public {
+        uint256 externalId = 23;
+        BountyVault.Kind kind = BountyVault.Kind.Fix;
+        bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(kind));
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), claimant);
+        factProvider.mockFulfill(cid, factBlob);
+        bytes32 factHash = keccak256(factBlob);
+        uint256 deadline = block.timestamp + 1 hours;
+
+        bytes32[] memory uids = new bytes32[](2);
+        uids[0] = _attest(agentWallets[0], cid, factHash, true);
+        uids[1] = _attest(agentWallets[1], cid, factHash, true);
+
+        // Stranger tries to redirect the payout to themselves.
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(BountyVault.RecipientNotBound.selector, stranger, claimant)
+        );
+        vault.payout(REPO_ID, externalId, kind, stranger, deadline, factHash, uids);
+    }
+
+    function test_payout_revertsWhenAuthorBindingIsZero() public {
+        uint256 externalId = 24;
+        BountyVault.Kind kind = BountyVault.Kind.Fix;
+        bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(kind));
+        // No binding marker in the GH body → ghAuthorBinding decodes as zero.
+        bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), address(0));
+        factProvider.mockFulfill(cid, factBlob);
+        bytes32 factHash = keccak256(factBlob);
+        uint256 deadline = block.timestamp + 1 hours;
+
+        bytes32[] memory uids = new bytes32[](2);
+        uids[0] = _attest(agentWallets[0], cid, factHash, true);
+        uids[1] = _attest(agentWallets[1], cid, factHash, true);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(BountyVault.RecipientNotBound.selector, claimant, address(0))
+        );
+        vault.payout(REPO_ID, externalId, kind, claimant, deadline, factHash, uids);
     }
 
     // ---------- helpers ----------
