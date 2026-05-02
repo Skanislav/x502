@@ -155,9 +155,12 @@ async function main() {
     COORDINATOR_CHAIN_ID: String(rt.chainId),
     VAULT_ADDRESS: rt.contracts.vault,
     FACT_PROVIDER_ADDRESS: rt.contracts.factProvider,
+    EAS_ADDRESS: rt.contracts.eas,
+    X502_SCHEMA_UID: rt.schemaUID,
     COORDINATOR_REPO: rt.repo.slug,
     COORDINATOR_THRESHOLD: String(rt.repo.threshold),
     COORDINATOR_TRUSTED_AGENT_IDS: rt.repo.trustedAgentIds.join(","),
+    COORDINATOR_TRUSTED_ATTESTERS: rt.verifiers.map((v) => v.address).join(","),
     COORDINATOR_FACT_TIMEOUT_MS: "30000",
     COORDINATOR_ATTESTATION_TIMEOUT_MS: "300000",
   });

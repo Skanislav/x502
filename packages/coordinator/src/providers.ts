@@ -1,4 +1,4 @@
-import type { Kind, SignedAttestation } from "@x502/shared";
+import type { Kind } from "@x502/shared";
 import type { Hono } from "hono";
 import type { Address, Hex } from "viem";
 
@@ -12,7 +12,9 @@ export interface IFactProvider {
   awaitFact(claimId: Hex, timeoutMs: number): Promise<Hex>;
 }
 
-/// Submits the assembled payout bundle on chain.
+/// Submits the EAS-attested payout bundle on chain. The vault validates
+/// each UID against its global x502 schema; the coordinator's role is just
+/// to pre-select the right UIDs and call payout.
 export interface IVaultWriter {
   submitPayout(args: {
     repoId: Hex;
@@ -21,13 +23,21 @@ export interface IVaultWriter {
     recipient: Address;
     deadline: bigint;
     factHash: Hex;
-    attestations: SignedAttestation[];
+    attestationUIDs: Hex[];
   }): Promise<Hex>;
 }
 
-/// Repo registry: maps repoSlug ↔ repoId, vault config (threshold etc.).
+/// Repo registry: maps repoSlug ↔ repoId, vault config (threshold, agent ids
+/// for the on-chain config, attester addresses for the off-chain inbox).
 export interface IRepoRegistry {
-  resolve(slug: string): { repoId: Hex; threshold: number; trustedAgentIds: bigint[] } | undefined;
+  resolve(slug: string):
+    | {
+        repoId: Hex;
+        threshold: number;
+        trustedAgentIds: bigint[];
+        trustedAttesters: Address[];
+      }
+    | undefined;
   resolveSlug(repoId: Hex): string | undefined;
 }
 

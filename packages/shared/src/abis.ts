@@ -1972,5 +1972,27 @@ export const mockEASAbi = [
     outputs: [],
     stateMutability: "nonpayable",
   },
+  {
+    type: "event",
+    name: "Attested",
+    anonymous: false,
+    inputs: [
+      { name: "recipient", type: "address", indexed: true },
+      { name: "attester", type: "address", indexed: true },
+      { name: "uid", type: "bytes32", indexed: false },
+      { name: "schema", type: "bytes32", indexed: true },
+    ],
+  },
+  {
+    type: "event",
+    name: "Revoked",
+    anonymous: false,
+    inputs: [
+      { name: "recipient", type: "address", indexed: true },
+      { name: "attester", type: "address", indexed: true },
+      { name: "uid", type: "bytes32", indexed: false },
+      { name: "schema", type: "bytes32", indexed: true },
+    ],
+  },
 ] as const;
 export const mockEASBytecode = "0x" as `0x${string}`;

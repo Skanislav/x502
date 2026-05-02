@@ -8,17 +8,20 @@ import type { ClaimState } from "./types.js";
 export interface PipelineDeps {
   factProvider: IFactProvider;
   vault: IVaultWriter;
-  /// Per-claim attestation collector. Verifier-side skill helpers POST
-  /// signed attestations to the coordinator's `/attestation` endpoint;
-  /// the handler pushes them into this inbox. The pipeline waits on the
-  /// inbox until `threshold` sigs have arrived (or it times out).
+  /// Per-claim collector for EAS attestation UIDs. The EAS event watcher
+  /// observes `Attested` events under the vault's schema and pushes
+  /// matching ones here. Pipeline awaits the inbox until threshold UIDs
+  /// have arrived (or it times out).
   inbox: AttestationInbox;
   threshold: number;
-  trustedAgentIds: Set<string>;
+  /// Lower-cased addresses of trusted attesters for this claim's repo —
+  /// resolved at /claim time from `repo.trustedAgentIds` via the agent
+  /// registry. Inbox-pushes from any other attester are silently dropped.
+  trustedAttesters: Set<string>;
   factTimeoutMs: number;
-  /// How long the coordinator waits for verifiers to push attestations
-  /// after the fact has been delivered. Verifiers are humans driving
-  /// `claude` locally, so this is generous (default 5 min).
+  /// How long the coordinator waits for verifiers to attest via EAS after
+  /// the fact has been delivered. Verifiers are humans driving `claude`
+  /// locally, so this is generous (default 5 min).
   attestationTimeoutMs: number;
   events?: EventSubscriber;
 }
@@ -55,16 +58,18 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
     }
   }
 
-  // 2) Open the inbox for this claim and wait for verifiers (humans running
-  //    `claude` with the x502-verify skill on their own machines) to push
-  //    signed attestations via `POST /attestation`.
-  let accepted: typeof state.attestations;
+  // 2) Open the inbox for this claim and wait for verifier-side skill
+  //    helpers (humans running `claude` with the x502-verify skill on their
+  //    own machines) to publish attestations to EAS. The coordinator's
+  //    EAS event watcher observes the on-chain Attested events and pushes
+  //    matching ones here.
+  let attestationUIDs: Hex[];
   try {
-    accepted = await deps.inbox.await({
+    attestationUIDs = await deps.inbox.await({
       claimId,
       factHash: state.factHash!,
       threshold: deps.threshold,
-      trustedAgentIds: deps.trustedAgentIds,
+      trustedAttesters: deps.trustedAttesters,
       timeoutMs: deps.attestationTimeoutMs,
     });
   } catch (e) {
@@ -74,11 +79,12 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
     return;
   }
 
-  state.attestations = accepted;
+  state.attestationUIDs = attestationUIDs;
   state.status = "ready";
   state.updatedAt = Date.now();
 
-  // 3) Submit payout
+  // 3) Submit payout (permissionless on-chain — coordinator does it as a
+  //    convenience but anyone with the UIDs could).
   try {
     const tx = await deps.vault.submitPayout({
       repoId,
@@ -87,7 +93,7 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
       recipient: request.recipient,
       deadline,
       factHash: state.factHash!,
-      attestations: state.attestations,
+      attestationUIDs,
     });
     state.txHash = tx;
     state.status = "paid";

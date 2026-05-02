@@ -1,19 +1,11 @@
-/// Unit tests for the inbox-driven pipeline. Verifiers are no longer pulled
-/// (the Hono fan-out is gone); they push signed attestations to the
-/// coordinator's `/attestation` endpoint, which routes them into the inbox.
-/// Pipeline awaits inbox.
+/// Unit tests for the EAS-driven pipeline. The watcher is bypassed —
+/// tests push attestation UIDs into the inbox directly. End-to-end
+/// EAS observation is exercised in the integration / fork tests.
 
 import { type Address, type Hex, encodeAbiParameters } from "viem";
 import { describe, expect, it } from "vitest";
 
-import {
-  type DemoEvent,
-  EventBus,
-  Kind,
-  type SignedAttestation,
-  deriveClaimId,
-  repoIdFromSlug,
-} from "@x502/shared";
+import { type DemoEvent, EventBus, Kind, deriveClaimId, repoIdFromSlug } from "@x502/shared";
 
 import { AttestationInbox } from "../src/inbox.js";
 import { runClaimPipeline } from "../src/pipeline.js";
@@ -62,6 +54,16 @@ const FACT_HASH = ((): Hex => {
   return keccak256(FACT_BLOB);
 })();
 
+const ATTESTER_101 = "0x1010101010101010101010101010101010101010" as Address;
+const ATTESTER_102 = "0x2020202020202020202020202020202020202020" as Address;
+const ATTESTER_103 = "0x3030303030303030303030303030303030303030" as Address;
+
+function uidFor(attester: Address, claimId: Hex): Hex {
+  // deterministic test UID: keccak(attester || claimId)
+  const { keccak256 } = require("viem") as typeof import("viem");
+  return keccak256(`${attester}${claimId.slice(2)}` as Hex);
+}
+
 function makeState(externalId = 42n): ClaimState {
   const repoId = repoIdFromSlug(REPO_SLUG);
   const kind = Kind.Fix;
@@ -72,28 +74,14 @@ function makeState(externalId = 42n): ClaimState {
     request: { repoSlug: REPO_SLUG, externalId, kind, recipient: RECIPIENT },
     deadline: BigInt(Math.floor(Date.now() / 1000) + 600),
     status: "verifying",
-    attestations: [],
+    attestationUIDs: [],
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
 }
 
-function makeAttestation(
-  claimId: Hex,
-  agentId: bigint,
-  factHash: Hex,
-  recipient: Address,
-  deadline: bigint,
-): SignedAttestation {
-  return {
-    agentId,
-    signature: `0x${agentId.toString(16).padStart(2, "0").repeat(65)}` as Hex,
-    attestation: { claimId, recipient, deadline, factHash },
-  };
-}
-
-describe("runClaimPipeline (inbox-driven)", () => {
-  it("waits on the inbox and pays once threshold attestations arrive", async () => {
+describe("runClaimPipeline (EAS inbox)", () => {
+  it("waits on the inbox and pays once threshold UIDs arrive", async () => {
     const state = makeState();
     const factProvider = new FixedFactProvider(FACT_BLOB);
     const vault = new ScriptedVault({ type: "ok" });
@@ -102,41 +90,45 @@ describe("runClaimPipeline (inbox-driven)", () => {
     const seen: DemoEvent[] = [];
     events.subscribe((e) => seen.push(e));
 
-    const trusted = new Set(["101", "102", "103"]);
+    const trusted = new Set([ATTESTER_101, ATTESTER_102, ATTESTER_103].map((a) => a.toLowerCase()));
     const pipelinePromise = runClaimPipeline(state, {
       factProvider,
       vault,
       inbox,
       threshold: 2,
-      trustedAgentIds: trusted,
+      trustedAttesters: trusted,
       factTimeoutMs: 1_000,
       attestationTimeoutMs: 1_000,
       events,
     });
 
-    // Wait until the inbox is open (i.e. fact has been delivered).
     await waitFor(() => inbox.isOpen(state.claimId), 1_000);
 
-    inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 102n, FACT_HASH, RECIPIENT, state.deadline),
-    );
-    inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 101n, FACT_HASH, RECIPIENT, state.deadline),
-    );
+    inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: uidFor(ATTESTER_102, state.claimId),
+      attester: ATTESTER_102,
+    });
+    inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: uidFor(ATTESTER_101, state.claimId),
+      attester: ATTESTER_101,
+    });
 
     await pipelinePromise;
     expect(state.status).toBe("paid");
-    expect(state.attestations).toHaveLength(2);
-    // Sorted by agentId ascending.
-    expect(state.attestations.map((a) => a.agentId)).toEqual([101n, 102n]);
+    expect(state.attestationUIDs).toHaveLength(2);
+    // Sorted by attester address ascending — 101 < 102.
+    expect(state.attestationUIDs[0]).toBe(uidFor(ATTESTER_101, state.claimId));
+    expect(state.attestationUIDs[1]).toBe(uidFor(ATTESTER_102, state.claimId));
     expect(seen.map((e) => e.type)).toContain("fact.requested");
     expect(seen.map((e) => e.type)).toContain("fact.delivered");
     expect(seen.map((e) => e.type)).toContain("payout.confirmed");
   });
 
-  it("rejects an attestation whose agentId is not in the trusted set", async () => {
+  it("rejects an attestation whose attester is not in the trusted set", async () => {
     const state = makeState(7n);
     const factProvider = new FixedFactProvider(FACT_BLOB);
     const vault = new ScriptedVault({ type: "ok" });
@@ -147,30 +139,33 @@ describe("runClaimPipeline (inbox-driven)", () => {
       vault,
       inbox,
       threshold: 1,
-      trustedAgentIds: new Set(["101"]),
+      trustedAttesters: new Set([ATTESTER_101.toLowerCase()]),
       factTimeoutMs: 1_000,
       attestationTimeoutMs: 200,
-      events: undefined,
     });
 
     await waitFor(() => inbox.isOpen(state.claimId), 1_000);
-    const r = inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 999n, FACT_HASH, RECIPIENT, state.deadline),
-    );
+    const rogue = "0x9999999999999999999999999999999999999999" as Address;
+    const r = inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: uidFor(rogue, state.claimId),
+      attester: rogue,
+    });
     expect(r.accepted).toBe(false);
-    expect(r.reason).toMatch(/trusted set/);
+    expect(r.reason).toMatch(/not trusted/);
 
-    // Add the trusted one — pipeline completes.
-    inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 101n, FACT_HASH, RECIPIENT, state.deadline),
-    );
+    inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: uidFor(ATTESTER_101, state.claimId),
+      attester: ATTESTER_101,
+    });
     await pipelinePromise;
     expect(state.status).toBe("paid");
   });
 
-  it("rejects an attestation whose factHash disagrees with the delivered fact", async () => {
+  it("rejects pushes whose factHash disagrees with the delivered fact", async () => {
     const state = makeState(8n);
     const factProvider = new FixedFactProvider(FACT_BLOB);
     const vault = new ScriptedVault({ type: "ok" });
@@ -181,30 +176,33 @@ describe("runClaimPipeline (inbox-driven)", () => {
       vault,
       inbox,
       threshold: 1,
-      trustedAgentIds: new Set(["101"]),
+      trustedAttesters: new Set([ATTESTER_101.toLowerCase()]),
       factTimeoutMs: 1_000,
       attestationTimeoutMs: 200,
-      events: undefined,
     });
 
     await waitFor(() => inbox.isOpen(state.claimId), 1_000);
     const wrongHash = `0x${"ee".repeat(32)}` as Hex;
-    const r = inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 101n, wrongHash, RECIPIENT, state.deadline),
-    );
+    const r = inbox.push({
+      claimId: state.claimId,
+      factHash: wrongHash,
+      uid: uidFor(ATTESTER_101, state.claimId),
+      attester: ATTESTER_101,
+    });
     expect(r.accepted).toBe(false);
     expect(r.reason).toMatch(/factHash/);
 
-    inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 101n, FACT_HASH, RECIPIENT, state.deadline),
-    );
+    inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: uidFor(ATTESTER_101, state.claimId),
+      attester: ATTESTER_101,
+    });
     await pipelinePromise;
     expect(state.status).toBe("paid");
   });
 
-  it("dedups by agentId", async () => {
+  it("dedups by attester address", async () => {
     const state = makeState(9n);
     const factProvider = new FixedFactProvider(FACT_BLOB);
     const vault = new ScriptedVault({ type: "ok" });
@@ -215,28 +213,33 @@ describe("runClaimPipeline (inbox-driven)", () => {
       vault,
       inbox,
       threshold: 2,
-      trustedAgentIds: new Set(["101", "102"]),
+      trustedAttesters: new Set([ATTESTER_101.toLowerCase(), ATTESTER_102.toLowerCase()]),
       factTimeoutMs: 1_000,
       attestationTimeoutMs: 200,
-      events: undefined,
     });
 
     await waitFor(() => inbox.isOpen(state.claimId), 1_000);
-    inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 101n, FACT_HASH, RECIPIENT, state.deadline),
-    );
-    const dup = inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 101n, FACT_HASH, RECIPIENT, state.deadline),
-    );
+    inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: uidFor(ATTESTER_101, state.claimId),
+      attester: ATTESTER_101,
+    });
+    const dup = inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: `0x${"ff".repeat(32)}` as Hex,
+      attester: ATTESTER_101,
+    });
     expect(dup.accepted).toBe(false);
-    expect(dup.reason).toMatch(/already received/);
+    expect(dup.reason).toMatch(/already seen/);
 
-    inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 102n, FACT_HASH, RECIPIENT, state.deadline),
-    );
+    inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: uidFor(ATTESTER_102, state.claimId),
+      attester: ATTESTER_102,
+    });
     await pipelinePromise;
     expect(state.status).toBe("paid");
   });
@@ -252,10 +255,9 @@ describe("runClaimPipeline (inbox-driven)", () => {
       vault,
       inbox,
       threshold: 2,
-      trustedAgentIds: new Set(["101", "102"]),
+      trustedAttesters: new Set([ATTESTER_101.toLowerCase(), ATTESTER_102.toLowerCase()]),
       factTimeoutMs: 1_000,
       attestationTimeoutMs: 50,
-      events: undefined,
     });
 
     expect(state.status).toBe("failed");
@@ -277,21 +279,24 @@ describe("runClaimPipeline (inbox-driven)", () => {
       vault,
       inbox,
       threshold: 2,
-      trustedAgentIds: new Set(["101", "102"]),
+      trustedAttesters: new Set([ATTESTER_101.toLowerCase(), ATTESTER_102.toLowerCase()]),
       factTimeoutMs: 1_000,
       attestationTimeoutMs: 1_000,
-      events: undefined,
     });
 
     await waitFor(() => inbox.isOpen(state.claimId), 1_000);
-    inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 101n, FACT_HASH, RECIPIENT, state.deadline),
-    );
-    inbox.push(
-      state.claimId,
-      makeAttestation(state.claimId, 102n, FACT_HASH, RECIPIENT, state.deadline),
-    );
+    inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: uidFor(ATTESTER_101, state.claimId),
+      attester: ATTESTER_101,
+    });
+    inbox.push({
+      claimId: state.claimId,
+      factHash: FACT_HASH,
+      uid: uidFor(ATTESTER_102, state.claimId),
+      attester: ATTESTER_102,
+    });
     await pipelinePromise;
 
     expect(state.status).toBe("failed");
@@ -311,13 +316,39 @@ describe("runClaimPipeline (inbox-driven)", () => {
         vault,
         inbox,
         threshold: 1,
-        trustedAgentIds: new Set(["101"]),
+        trustedAttesters: new Set([ATTESTER_101.toLowerCase()]),
         factTimeoutMs: 50,
         attestationTimeoutMs: 1_000,
-        events: undefined,
       }),
     ).rejects.toThrow(/fact not delivered/);
     expect(vault.lastArgs).toBeUndefined();
+  });
+
+  it("submits attestationUIDs (not signatures) to the vault", async () => {
+    const state = makeState(13n);
+    const factProvider = new FixedFactProvider(FACT_BLOB);
+    const vault = new ScriptedVault({ type: "ok" });
+    const inbox = new AttestationInbox();
+
+    const pipelinePromise = runClaimPipeline(state, {
+      factProvider,
+      vault,
+      inbox,
+      threshold: 2,
+      trustedAttesters: new Set([ATTESTER_101.toLowerCase(), ATTESTER_102.toLowerCase()]),
+      factTimeoutMs: 1_000,
+      attestationTimeoutMs: 1_000,
+    });
+
+    await waitFor(() => inbox.isOpen(state.claimId), 1_000);
+    const uid1 = uidFor(ATTESTER_101, state.claimId);
+    const uid2 = uidFor(ATTESTER_102, state.claimId);
+    inbox.push({ claimId: state.claimId, factHash: FACT_HASH, uid: uid1, attester: ATTESTER_101 });
+    inbox.push({ claimId: state.claimId, factHash: FACT_HASH, uid: uid2, attester: ATTESTER_102 });
+    await pipelinePromise;
+
+    expect(vault.lastArgs?.attestationUIDs).toEqual([uid1, uid2]);
+    expect(vault.lastArgs?.factHash).toBe(state.factHash);
   });
 });
 

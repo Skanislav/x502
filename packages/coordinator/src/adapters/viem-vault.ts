@@ -1,4 +1,4 @@
-import type { Kind, SignedAttestation } from "@x502/shared";
+import type { Kind } from "@x502/shared";
 import { bountyVaultAbi } from "@x502/shared/abis";
 import type { Account, Address, Hex, PublicClient, WalletClient } from "viem";
 
@@ -19,12 +19,12 @@ export class ViemVaultWriter implements IVaultWriter {
     recipient: Address;
     deadline: bigint;
     factHash: Hex;
-    attestations: SignedAttestation[];
+    attestationUIDs: Hex[];
   }): Promise<Hex> {
-    const agentIds = args.attestations.map((a) => a.agentId);
-    const signatures = args.attestations.map((a) => a.signature);
-
-    // viem: simulate first to surface revert reason cleanly.
+    // simulate first so revert reasons surface cleanly. The ABI cast is
+    // necessary because the checked-in `bountyVaultAbi` lags the contract
+    // until `forge build && extract-abis` runs in CI (the on-chain shape
+    // is bytes32[] attestationUIDs).
     const { request } = await this.publicClient.simulateContract({
       address: this.vault,
       abi: bountyVaultAbi,
@@ -36,9 +36,8 @@ export class ViemVaultWriter implements IVaultWriter {
         args.recipient,
         args.deadline,
         args.factHash,
-        agentIds,
-        signatures,
-      ],
+        args.attestationUIDs,
+      ] as never,
       account: this.account,
     });
     const txHash = await this.wallet.writeContract(request);
