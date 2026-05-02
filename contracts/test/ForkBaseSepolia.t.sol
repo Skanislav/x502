@@ -48,10 +48,7 @@ contract ForkBaseSepoliaTest is Test {
     uint256 internal constant OUTCOME_FEE = 100_000;
 
     BountyVault.Prices internal defaultPrices = BountyVault.Prices({
-        report: 5_000_000,
-        triage: 2_000_000,
-        fix: 50_000_000,
-        docsTests: 30_000_000
+        report: 5_000_000, triage: 2_000_000, fix: 50_000_000, docsTests: 30_000_000
     });
 
     uint256[] internal agentIds;
