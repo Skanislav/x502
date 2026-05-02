@@ -253,7 +253,9 @@ export default function Page() {
             <span>{formatUsdc(meta.price)}</span>
           </div>
           <div className="flex justify-between text-muted text-xs">
-            <span>− verifier outcome fees ({VERIFIER_COUNT} × $0.10)</span>
+            <span>
+              − verifier outcome fees ({VERIFIER_COUNT} × {formatUsdc(OUTCOME_FEE_PER_VERIFIER)})
+            </span>
             <span>−{formatUsdc(OUTCOME_FEE_PER_VERIFIER * BigInt(VERIFIER_COUNT))}</span>
           </div>
           <hr className="border-paper/10 my-1" />

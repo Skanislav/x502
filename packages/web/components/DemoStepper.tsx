@@ -40,13 +40,13 @@ const STEPS: Array<{ key: StepKey; title: string; copy: string }> = [
   },
   {
     key: "verifiers",
-    title: "6 · Verifiers sign",
-    copy: "Each verifier identity runs the `x502-verify` skill in their local Claude. The skill fetches the issue, applies the kind-specific rubric, signs an EIP-712 attestation, and POSTs it to the coordinator. Coordinator collects M of N.",
+    title: "6 · Verifiers attest",
+    copy: "Each verifier identity runs the `x502-verify` skill in their local Claude. The skill fetches the issue, applies the kind-specific rubric, and publishes an EAS attestation under the vault's schema for `(claimId, factHash, accept)`. The coordinator's EAS event watcher observes them on-chain until M of N have landed.",
   },
   {
     key: "payout",
     title: "7 · Vault settles",
-    copy: "Coordinator submits `BountyVault.payout(...)` with the M signatures + factHash. The vault re-derives the EIP-712 digest, decodes status, and transfers USDC to Alice + a tiny outcome fee to each signer.",
+    copy: "Coordinator submits `BountyVault.payout(...)` with the M attestation UIDs + factHash. The vault re-fetches each attestation by UID, validates schema/revocation/claim binding/trust, and transfers USDC to Alice + a tiny outcome fee to each attester.",
   },
   {
     key: "done",
