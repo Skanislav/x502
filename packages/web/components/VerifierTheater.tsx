@@ -4,13 +4,13 @@ import { useEffect, useState } from "react";
 import { subscribeDemoEvents } from "../lib/events";
 import { shortHash } from "../lib/format";
 
-type Status = "idle" | "signed";
+type Status = "idle" | "attested";
 
 interface AgentColumn {
   agentId: string;
+  attesterAddress: string;
   status: Status;
-  signature?: string;
-  signedAt?: number;
+  uid?: string;
 }
 
 interface FactState {
@@ -22,14 +22,25 @@ interface FactState {
 export function VerifierTheater({
   coordinatorUrl,
   claimId,
-  agentIds,
+  agents: agentSpecs,
+  easExplorerBase,
 }: {
   coordinatorUrl: string;
   claimId: string | undefined;
-  agentIds: string[];
+  /// (agentId, address) pairs from the demo runtime — used to map an
+  /// observed attester back to the verifier identity for display.
+  agents: Array<{ agentId: string; address: string }>;
+  /// Optional. Base URL for an attestation explorer (e.g. attest.org). When
+  /// set, each attested column links to `${easExplorerBase}/${uid}`.
+  easExplorerBase?: string;
 }) {
   const [agents, setAgents] = useState<Record<string, AgentColumn>>(() =>
-    Object.fromEntries(agentIds.map((id) => [id, { agentId: id, status: "idle" }])),
+    Object.fromEntries(
+      agentSpecs.map((s) => [
+        s.address.toLowerCase(),
+        { agentId: s.agentId, attesterAddress: s.address, status: "idle" },
+      ]),
+    ),
   );
   const [fact, setFact] = useState<FactState>({});
   const [payoutTx, setPayoutTx] = useState<string | undefined>();
@@ -46,16 +57,16 @@ export function VerifierTheater({
             ghAuthorBinding: event.ghAuthorBinding,
           });
         }
-        if (event.type === "verifier.signed") {
-          setAgents((s) => ({
-            ...s,
-            [event.agentId]: {
-              ...s[event.agentId]!,
-              status: "signed",
-              signature: event.signature,
-              signedAt: event.ts,
-            },
-          }));
+        if (event.type === "attestation.observed") {
+          const key = event.attester.toLowerCase();
+          setAgents((s) => {
+            const slot = s[key];
+            if (!slot) return s;
+            return {
+              ...s,
+              [key]: { ...slot, status: "attested", uid: event.uid },
+            };
+          });
         }
         if (event.type === "payout.confirmed") {
           setPayoutTx(event.txHash);
@@ -70,7 +81,7 @@ export function VerifierTheater({
       <h2 className="text-xs uppercase tracking-widest text-muted">Verifier theater</h2>
       <p className="text-[11px] text-muted leading-snug">
         Each verifier identity runs the <code>x502-verify</code> skill in their own Claude. Their
-        attestations land here as they're pushed to the coordinator.
+        EAS attestations land here as the coordinator observes them on chain.
       </p>
 
       <div className="rounded border border-paper/10 p-3 text-xs space-y-1">
@@ -101,9 +112,9 @@ export function VerifierTheater({
       </div>
 
       <div className="grid grid-cols-3 gap-2">
-        {agentIds.map((id) => {
-          const a = agents[id]!;
-          return <AgentColumnCard key={id} agent={a} />;
+        {agentSpecs.map((s) => {
+          const a = agents[s.address.toLowerCase()]!;
+          return <AgentColumnCard key={s.agentId} agent={a} explorer={easExplorerBase} />;
         })}
       </div>
 
@@ -117,20 +128,40 @@ export function VerifierTheater({
   );
 }
 
-function AgentColumnCard({ agent }: { agent: AgentColumn }) {
+function AgentColumnCard({
+  agent,
+  explorer,
+}: {
+  agent: AgentColumn;
+  explorer?: string;
+}) {
   const className =
-    agent.status === "signed" ? "border-accent/60 bg-accent/5" : "border-paper/10 animate-pulse";
+    agent.status === "attested" ? "border-accent/60 bg-accent/5" : "border-paper/10 animate-pulse";
   return (
     <div className={`rounded border ${className} p-3 text-xs space-y-2`}>
       <div className="flex justify-between items-baseline">
         <span className="font-semibold">agent {agent.agentId}</span>
-        <span className={agent.status === "signed" ? "text-accent" : "text-muted"}>
-          {agent.status === "signed" ? "✓ signed" : "waiting…"}
+        <span className={agent.status === "attested" ? "text-accent" : "text-muted"}>
+          {agent.status === "attested" ? "✓ attested" : "waiting…"}
         </span>
       </div>
-      {agent.signature && (
-        <p className="text-[10px] font-mono break-all text-muted">
-          sig {shortHash(agent.signature as `0x${string}`)}
+      <p className="text-[10px] font-mono break-all text-muted">
+        {shortHash(agent.attesterAddress as `0x${string}`)}
+      </p>
+      {agent.uid && (
+        <p className="text-[10px] font-mono break-all">
+          {explorer ? (
+            <a
+              href={`${explorer.replace(/\/$/, "")}/${agent.uid}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-accent underline"
+            >
+              uid {shortHash(agent.uid as `0x${string}`)}
+            </a>
+          ) : (
+            <span className="text-muted">uid {shortHash(agent.uid as `0x${string}`)}</span>
+          )}
         </p>
       )}
     </div>

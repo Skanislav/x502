@@ -26,7 +26,13 @@ export type DemoEvent =
       ghAuthorBinding: Address;
       ts: number;
     }
-  | { type: "verifier.signed"; claimId: Hex; agentId: string; signature: Hex; ts: number }
+  | {
+      type: "attestation.observed";
+      claimId: Hex;
+      uid: Hex;
+      attester: Address;
+      ts: number;
+    }
   | { type: "payout.submitted"; claimId: Hex; txHash: Hex; ts: number }
   | { type: "payout.confirmed"; claimId: Hex; txHash: Hex; ts: number };
 
