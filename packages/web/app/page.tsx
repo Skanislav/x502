@@ -21,27 +21,27 @@ interface DemoConfig {
 const KIND_META: Record<KindName, { label: string; price: bigint; description: string }> = {
   report: {
     label: "report",
-    price: 5_000_000n,
+    price: 50_000n,
     description: "novel + reproducible bug report",
   },
   triage: {
     label: "triage",
-    price: 2_000_000n,
+    price: 20_000n,
     description: "added substantive labels + dedup links",
   },
   fix: {
     label: "fix",
-    price: 50_000_000n,
+    price: 500_000n,
     description: "merged PR closing a linked issue",
   },
   docs_tests: {
     label: "docs_tests",
-    price: 30_000_000n,
+    price: 300_000n,
     description: "merged PR adding tests or fixing stale docs",
   },
 };
 
-const OUTCOME_FEE_PER_VERIFIER = 100_000n;
+const OUTCOME_FEE_PER_VERIFIER = 1_000n;
 const VERIFIER_COUNT = 2;
 
 export default function Page() {

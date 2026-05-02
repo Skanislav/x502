@@ -199,12 +199,12 @@ async function main() {
 
   const repoId = repoIdFromSlug(REPO_SLUG);
   const prices = {
-    report: parseUnits("5", 6),
-    triage: parseUnits("2", 6),
-    fix: parseUnits("50", 6),
-    docsTests: parseUnits("30", 6),
+    report: parseUnits("0.05", 6),
+    triage: parseUnits("0.02", 6),
+    fix: parseUnits("0.5", 6),
+    docsTests: parseUnits("0.3", 6),
   };
-  const outcomeFee = 100_000n;
+  const outcomeFee = 1_000n;
   const threshold = 2;
 
   process.stdout.write(`[seed] configuring repo ${REPO_SLUG}\n`);
@@ -217,8 +217,8 @@ async function main() {
     account: deployer as Account,
   });
 
-  const funding = parseUnits("200", 6);
-  process.stdout.write("[seed] funding vault with 200 USDC\n");
+  const funding = parseUnits("2", 6);
+  process.stdout.write("[seed] funding vault with 2 USDC\n");
   await wallet.writeContract({
     address: usdc,
     abi: mockUSDCAbi,
