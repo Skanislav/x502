@@ -20,7 +20,7 @@ const FACT_BLOB = encodeAbiParameters(
   [1, 1n, `0x${"00".repeat(32)}` as Hex, RECIPIENT],
 );
 const STATE_FACT_HASH = keccak256(FACT_BLOB);
-const WRONG_FACT_HASH = keccak256(`0xdeadbeef` as Hex);
+const WRONG_FACT_HASH = keccak256("0xdeadbeef" as Hex);
 
 function makeState(): ClaimState {
   return {
@@ -79,9 +79,11 @@ async function deliverLog(
   attester: Address,
 ): Promise<void> {
   // handleLog is private; tests reach through the type to verify routing.
-  await (watcher as unknown as {
-    handleLog: (log: { args: { uid?: Hex; attester?: Address } }) => Promise<void>;
-  }).handleLog({ args: { uid, attester } });
+  await (
+    watcher as unknown as {
+      handleLog: (log: { args: { uid?: Hex; attester?: Address } }) => Promise<void>;
+    }
+  ).handleLog({ args: { uid, attester } });
 }
 
 describe("EasAttestationWatcher.handleLog", () => {
