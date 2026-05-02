@@ -1,42 +1,38 @@
-import type { EventSubscriber, Kind, SignedAttestation } from "@x502/shared";
+import type { EventSubscriber } from "@x502/shared";
 import { type Hex, decodeAbiParameters, keccak256 } from "viem";
 
-import type { IFactProvider, IVaultWriter, IVerifierClient } from "./providers.js";
+import type { AttestationInbox } from "./inbox.js";
+import type { IFactProvider, IVaultWriter } from "./providers.js";
 import type { ClaimState } from "./types.js";
 
 export interface PipelineDeps {
   factProvider: IFactProvider;
-  verifiers: IVerifierClient[];
   vault: IVaultWriter;
+  /// Per-claim attestation collector. Verifier-side skill helpers POST
+  /// signed attestations to the coordinator's `/attestation` endpoint;
+  /// the handler pushes them into this inbox. The pipeline waits on the
+  /// inbox until `threshold` sigs have arrived (or it times out).
+  inbox: AttestationInbox;
   threshold: number;
+  trustedAgentIds: Set<string>;
   factTimeoutMs: number;
-  verifierTimeoutMs: number;
-  /// Optional sink for live demo events. Pipeline emits fact.requested,
-  /// fact.delivered, payout.submitted, payout.confirmed. Verifier-side events
-  /// (verifier.started/reasoning/signed/rejected) come from the verifiers
-  /// themselves via the coordinator's SSE re-publish bridge.
+  /// How long the coordinator waits for verifiers to push attestations
+  /// after the fact has been delivered. Verifiers are humans driving
+  /// `claude` locally, so this is generous (default 5 min).
+  attestationTimeoutMs: number;
   events?: EventSubscriber;
 }
 
-/// Drives a single claim from `verifying` → `paid` (or `failed`). Resolves when
-/// the terminal state has been reached. Mutates `state` in place; HTTP poll
-/// handler reads `state` to compute its response.
+/// Drives a single claim from `verifying` → `paid` (or `failed`). Resolves
+/// when the terminal state has been reached. Mutates `state` in place; HTTP
+/// poll handler reads `state` to compute its response.
 export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): Promise<void> {
   const { repoId, request, deadline, claimId } = state;
 
-  // 1) Trigger Chainlink Functions fact request and verifier fan-out in parallel.
+  // 1) Trigger the Chainlink Functions fact request.
   deps.events?.publish({ type: "fact.requested", claimId, ts: Date.now() });
-  const factPromise = (async () => {
-    await deps.factProvider.requestFact(
-      claimId,
-      request.repoSlug,
-      request.externalId,
-      request.kind,
-    );
-    return deps.factProvider.awaitFact(claimId, deps.factTimeoutMs);
-  })();
-
-  const factBlob = await factPromise;
+  await deps.factProvider.requestFact(claimId, request.repoSlug, request.externalId, request.kind);
+  const factBlob = await deps.factProvider.awaitFact(claimId, deps.factTimeoutMs);
   state.factBlob = factBlob;
   state.factHash = keccak256(factBlob);
   if (deps.events) {
@@ -59,57 +55,30 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
     }
   }
 
-  // 2) Now we know factHash, ask each verifier to sign over it.
-  //    (We could fan-out earlier with a guess, but the signed factHash binds
-  //    the agent to the exact onchain fact — no race.)
-  const verifyPromises = deps.verifiers.map(async (v) => {
-    let timeout: ReturnType<typeof setTimeout> | undefined;
-    try {
-      const r = await Promise.race([
-        v.verify({
-          repoId,
-          externalId: request.externalId,
-          kind: request.kind,
-          recipient: request.recipient,
-          deadline,
-          factHash: state.factHash!,
-          agentIdReveal: request.agentIdReveal,
-          saltReveal: request.saltReveal,
-        }),
-        new Promise<{ rejected: string }>((_, rej) => {
-          timeout = setTimeout(() => rej(new Error("verifier timeout")), deps.verifierTimeoutMs);
-        }),
-      ]);
-      return r;
-    } catch (e) {
-      return { rejected: (e as Error).message };
-    } finally {
-      if (timeout) clearTimeout(timeout);
-    }
-  });
-
-  const responses = await Promise.all(verifyPromises);
-  const accepted: SignedAttestation[] = [];
-  const rejections: string[] = [];
-  for (const r of responses) {
-    if ("rejected" in r) rejections.push(r.rejected);
-    else accepted.push(r);
-  }
-
-  if (accepted.length < deps.threshold) {
+  // 2) Open the inbox for this claim and wait for verifiers (humans running
+  //    `claude` with the x502-verify skill on their own machines) to push
+  //    signed attestations via `POST /attestation`.
+  let accepted: typeof state.attestations;
+  try {
+    accepted = await deps.inbox.await({
+      claimId,
+      factHash: state.factHash!,
+      threshold: deps.threshold,
+      trustedAgentIds: deps.trustedAgentIds,
+      timeoutMs: deps.attestationTimeoutMs,
+    });
+  } catch (e) {
     state.status = "failed";
-    state.error = `insufficient verifier signatures: ${accepted.length}/${deps.threshold} (${rejections.join("; ")})`;
+    state.error = (e as Error).message;
     state.updatedAt = Date.now();
     return;
   }
 
-  // 3) Trim to threshold (deterministic: sort by agentId for reproducibility)
-  accepted.sort((a, b) => (a.agentId < b.agentId ? -1 : 1));
-  state.attestations = accepted.slice(0, deps.threshold);
+  state.attestations = accepted;
   state.status = "ready";
   state.updatedAt = Date.now();
 
-  // 4) Submit payout
+  // 3) Submit payout
   try {
     const tx = await deps.vault.submitPayout({
       repoId,

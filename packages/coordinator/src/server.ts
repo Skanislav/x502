@@ -1,16 +1,15 @@
+import { EventBus, Kind, type KindName, type SignedAttestation, deriveClaimId } from "@x502/shared";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { type Address, type Hex, isAddress } from "viem";
+import { type Address, type Hex, isAddress, isHex } from "viem";
 
-import { type DemoEvent, EventBus, Kind, type KindName, deriveClaimId } from "@x502/shared";
-
+import { AttestationInbox } from "./inbox.js";
 import { runClaimPipeline } from "./pipeline.js";
 import {
   type IFactProvider,
   type IPaymentGate,
   type IRepoRegistry,
   type IVaultWriter,
-  type IVerifierClient,
   NoopPaymentGate,
 } from "./providers.js";
 import type { ClaimRequestBody, ClaimState } from "./types.js";
@@ -26,13 +25,12 @@ export interface CoordinatorOptions {
   factProvider: IFactProvider;
   vault: IVaultWriter;
   repoRegistry: IRepoRegistry;
-  /// All known verifiers. Each claim's repo config narrows to a trusted subset.
-  verifiers: IVerifierClient[];
   paymentGate?: IPaymentGate;
   /// How long the pipeline will wait for the Chainlink Functions fact.
   factTimeoutMs?: number;
-  /// How long the pipeline will wait for each verifier.
-  verifierTimeoutMs?: number;
+  /// How long the pipeline will wait for verifier-side skill helpers to
+  /// push signed attestations (humans + Claude, default 5 min).
+  attestationTimeoutMs?: number;
   /// EIP-712 attestation deadline window (now + windowSec).
   deadlineWindowSec?: number;
   /// Poll Retry-After hint, in seconds.
@@ -68,32 +66,81 @@ function parseClaim(b: PostClaimBody): ClaimRequestBody {
   };
 }
 
+interface PostAttestationBody {
+  claimId: unknown;
+  agentId: unknown;
+  signature: unknown;
+  attestation: {
+    claimId?: unknown;
+    recipient?: unknown;
+    deadline?: unknown;
+    factHash?: unknown;
+  };
+}
+
+function parseAttestation(b: PostAttestationBody): {
+  claimId: Hex;
+  signed: SignedAttestation;
+} {
+  if (!isHex(b.claimId) || (b.claimId as string).length !== 66) throw new Error("bad claimId");
+  if (typeof b.agentId !== "string" && typeof b.agentId !== "number")
+    throw new Error("agentId required (string|number)");
+  if (!isHex(b.signature)) throw new Error("signature must be 0x-hex");
+  const inner = b.attestation;
+  if (!inner || typeof inner !== "object") throw new Error("attestation required");
+  if (!isHex(inner.claimId) || (inner.claimId as string).length !== 66)
+    throw new Error("attestation.claimId must be bytes32 hex");
+  if (typeof inner.recipient !== "string" || !isAddress(inner.recipient))
+    throw new Error("attestation.recipient must be 0x-address");
+  if (typeof inner.deadline !== "string" && typeof inner.deadline !== "number")
+    throw new Error("attestation.deadline required");
+  if (!isHex(inner.factHash) || (inner.factHash as string).length !== 66)
+    throw new Error("attestation.factHash must be bytes32 hex");
+  if ((b.claimId as string).toLowerCase() !== (inner.claimId as string).toLowerCase())
+    throw new Error("body.claimId and attestation.claimId disagree");
+
+  return {
+    claimId: b.claimId as Hex,
+    signed: {
+      agentId: BigInt(b.agentId as string | number),
+      signature: b.signature as Hex,
+      attestation: {
+        claimId: inner.claimId as Hex,
+        recipient: inner.recipient as Address,
+        deadline: BigInt(inner.deadline as string | number),
+        factHash: inner.factHash as Hex,
+      },
+    },
+  };
+}
+
 export interface Coordinator {
   app: Hono;
   /// In-memory claim store (exposed for tests / introspection).
   claims: Map<Hex, ClaimState>;
   /// Event bus the demo UI subscribes to via SSE. Tests can subscribe directly.
   events: EventBus;
+  /// Inbox for verifier-side attestation pushes — exposed for tests.
+  inbox: AttestationInbox;
 }
 
 export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
   const paymentGate = opts.paymentGate ?? new NoopPaymentGate();
   const factTimeoutMs = opts.factTimeoutMs ?? 120_000;
-  const verifierTimeoutMs = opts.verifierTimeoutMs ?? 30_000;
+  const attestationTimeoutMs = opts.attestationTimeoutMs ?? 5 * 60_000;
   const deadlineWindowSec = opts.deadlineWindowSec ?? 30 * 60;
   const pollRetryAfterSec = opts.pollRetryAfterSec ?? 5;
 
   const claims = new Map<Hex, ClaimState>();
   const events = new EventBus();
+  const inbox = new AttestationInbox();
   const app = new Hono();
 
   // Mount the x402 (or noop) gate. It registers a global middleware that
   // matches the routes it's configured to gate (typically /claim).
   paymentGate.apply(app);
 
-  app.get("/health", (c) =>
-    c.json({ ok: true, knownClaims: claims.size, verifiers: opts.verifiers.length }),
-  );
+  app.get("/health", (c) => c.json({ ok: true, knownClaims: claims.size }));
 
   app.post("/claim", async (c) => {
     let parsed: ClaimRequestBody;
@@ -130,15 +177,6 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
     };
     claims.set(claimId, state);
 
-    // Filter verifiers to the repo's trusted set
-    const trusted = new Set(repo.trustedAgentIds.map((id) => id.toString()));
-    const repoVerifiers = opts.verifiers.filter((v) => trusted.has(v.agentId.toString()));
-    if (repoVerifiers.length < repo.threshold) {
-      state.status = "failed";
-      state.error = `repo trusts ${repo.trustedAgentIds.length} agents, coordinator only knows ${repoVerifiers.length}`;
-      return c.json({ error: state.error }, 503);
-    }
-
     events.publish({
       type: "claim.opened",
       claimId,
@@ -151,11 +189,12 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
     // Fire pipeline; do NOT await — return poll URL immediately.
     runClaimPipeline(state, {
       factProvider: opts.factProvider,
-      verifiers: repoVerifiers,
       vault: opts.vault,
+      inbox,
       threshold: repo.threshold,
+      trustedAgentIds: new Set(repo.trustedAgentIds.map((id) => id.toString())),
       factTimeoutMs,
-      verifierTimeoutMs,
+      attestationTimeoutMs,
       events,
     }).catch((e) => {
       state.status = "failed";
@@ -180,7 +219,6 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
       });
     }
     if (state.status === "failed") {
-      // Use 410 Gone — claim cannot be revived.
       return c.json({ status: "failed", error: state.error, claimId }, 410);
     }
     // Pending: 202 + Retry-After
@@ -189,11 +227,82 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
         status: state.status,
         claimId,
         factReady: state.factHash !== undefined,
-        sigs: state.attestations.length,
+        sigs: inbox.countOf(claimId),
       },
       202,
       { "Retry-After": String(pollRetryAfterSec) },
     );
+  });
+
+  /// Verifier-side skills call this to discover claims they should sign.
+  /// Returns claims where:
+  ///   - state is `verifying` (not yet paid/failed)
+  ///   - the fact has been delivered (so the skill knows what to sign over)
+  ///   - this agentId is in the repo's trusted set
+  app.get("/pending-claims/:agentId", (c) => {
+    const idStr = c.req.param("agentId");
+    let agentId: bigint;
+    try {
+      agentId = BigInt(idStr);
+    } catch {
+      return c.json({ error: "agentId must be a bigint string" }, 400);
+    }
+    const pending: Array<{
+      claimId: Hex;
+      repoSlug: string;
+      externalId: string;
+      kind: number;
+      recipient: Address;
+      deadline: string;
+      factHash: Hex;
+      agentIdReveal?: string;
+      saltReveal?: Hex;
+    }> = [];
+    for (const state of claims.values()) {
+      if (state.status !== "verifying") continue;
+      if (!state.factHash) continue;
+      const slug = opts.repoRegistry.resolveSlug(state.repoId);
+      if (!slug) continue;
+      const repo = opts.repoRegistry.resolve(slug);
+      if (!repo) continue;
+      if (!repo.trustedAgentIds.some((id) => id === agentId)) continue;
+      pending.push({
+        claimId: state.claimId,
+        repoSlug: slug,
+        externalId: state.request.externalId.toString(),
+        kind: state.request.kind,
+        recipient: state.request.recipient,
+        deadline: state.deadline.toString(),
+        factHash: state.factHash,
+        agentIdReveal: state.request.agentIdReveal?.toString(),
+        saltReveal: state.request.saltReveal,
+      });
+    }
+    return c.json({ agentId: idStr, pending });
+  });
+
+  /// Verifier-side skill helper POSTs here once it has signed an
+  /// attestation. The inbox dedups + threshold-counts; when threshold is
+  /// reached the pipeline's await unblocks and the vault.payout fires.
+  app.post("/attestation", async (c) => {
+    let parsed: ReturnType<typeof parseAttestation>;
+    try {
+      parsed = parseAttestation((await c.req.json()) as PostAttestationBody);
+    } catch (e) {
+      return c.json({ error: (e as Error).message }, 400);
+    }
+    const result = inbox.push(parsed.claimId, parsed.signed);
+    if (!result.accepted) {
+      return c.json({ accepted: false, reason: result.reason }, 409);
+    }
+    events.publish({
+      type: "verifier.signed",
+      claimId: parsed.claimId,
+      agentId: parsed.signed.agentId.toString(),
+      signature: parsed.signed.signature,
+      ts: Date.now(),
+    });
+    return c.json({ accepted: true, sigs: result.total, threshold: result.threshold });
   });
 
   app.get("/events", (c) =>
@@ -204,51 +313,11 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
         });
       });
       stream.onAbort(() => sub.close());
-      // Hold the connection open until the client disconnects.
       await new Promise<void>((res) => {
         stream.onAbort(() => res());
       });
     }),
   );
 
-  // Best-effort: subscribe to each verifier's /events stream and re-publish
-  // its events on our bus. If a verifier doesn't expose /events (e.g. unit
-  // test stub), the request just fails silently.
-  for (const v of opts.verifiers) {
-    void subscribeToVerifierEvents(v.endpoint, events);
-  }
-
-  return { app, claims, events };
-}
-
-async function subscribeToVerifierEvents(endpoint: string, bus: EventBus): Promise<void> {
-  // Tiny SSE consumer — fetch the endpoint, parse `data: ` lines, publish.
-  // Not robust against reconnects; the demo is a one-shot stack so OK.
-  try {
-    const res = await fetch(`${endpoint}/events`);
-    if (!res.ok || !res.body) return;
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) return;
-      buf += decoder.decode(value, { stream: true });
-      for (;;) {
-        const idx = buf.indexOf("\n\n");
-        if (idx === -1) break;
-        const chunk = buf.slice(0, idx);
-        buf = buf.slice(idx + 2);
-        const dataLine = chunk.split("\n").find((l) => l.startsWith("data:"));
-        if (!dataLine) continue;
-        try {
-          bus.publish(JSON.parse(dataLine.slice(5).trim()) as DemoEvent);
-        } catch {
-          /* malformed event — skip */
-        }
-      }
-    }
-  } catch {
-    /* verifier doesn't expose /events — that's fine */
-  }
+  return { app, claims, events, inbox };
 }

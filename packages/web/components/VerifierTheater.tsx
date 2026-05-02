@@ -1,18 +1,16 @@
 "use client";
 
-import type { DemoEvent } from "@x502/shared";
 import { useEffect, useState } from "react";
 import { subscribeDemoEvents } from "../lib/events";
 import { shortHash } from "../lib/format";
 
-type Status = "idle" | "started" | "signed" | "rejected";
+type Status = "idle" | "signed";
 
 interface AgentColumn {
   agentId: string;
   status: Status;
-  reasoning: string;
-  finalReason?: string;
   signature?: string;
+  signedAt?: number;
 }
 
 interface FactState {
@@ -31,7 +29,7 @@ export function VerifierTheater({
   agentIds: string[];
 }) {
   const [agents, setAgents] = useState<Record<string, AgentColumn>>(() =>
-    Object.fromEntries(agentIds.map((id) => [id, { agentId: id, status: "idle", reasoning: "" }])),
+    Object.fromEntries(agentIds.map((id) => [id, { agentId: id, status: "idle" }])),
   );
   const [fact, setFact] = useState<FactState>({});
   const [payoutTx, setPayoutTx] = useState<string | undefined>();
@@ -48,22 +46,6 @@ export function VerifierTheater({
             ghAuthorBinding: event.ghAuthorBinding,
           });
         }
-        if (event.type === "verifier.started") {
-          setAgents((s) => ({
-            ...s,
-            [event.agentId]: { ...s[event.agentId]!, status: "started" },
-          }));
-        }
-        if (event.type === "verifier.reasoning") {
-          setAgents((s) => ({
-            ...s,
-            [event.agentId]: {
-              ...s[event.agentId]!,
-              reasoning: s[event.agentId]!.reasoning + event.thinkingChunk,
-              finalReason: event.final?.reason,
-            },
-          }));
-        }
         if (event.type === "verifier.signed") {
           setAgents((s) => ({
             ...s,
@@ -71,16 +53,7 @@ export function VerifierTheater({
               ...s[event.agentId]!,
               status: "signed",
               signature: event.signature,
-            },
-          }));
-        }
-        if (event.type === "verifier.rejected") {
-          setAgents((s) => ({
-            ...s,
-            [event.agentId]: {
-              ...s[event.agentId]!,
-              status: "rejected",
-              finalReason: event.reason,
+              signedAt: event.ts,
             },
           }));
         }
@@ -95,6 +68,10 @@ export function VerifierTheater({
   return (
     <section className="space-y-3">
       <h2 className="text-xs uppercase tracking-widest text-muted">Verifier theater</h2>
+      <p className="text-[11px] text-muted leading-snug">
+        Each verifier identity runs the <code>x502-verify</code> skill in their own Claude. Their
+        attestations land here as they're pushed to the coordinator.
+      </p>
 
       <div className="rounded border border-paper/10 p-3 text-xs space-y-1">
         <div className="flex justify-between">
@@ -141,40 +118,16 @@ export function VerifierTheater({
 }
 
 function AgentColumnCard({ agent }: { agent: AgentColumn }) {
-  const colorByStatus: Record<Status, string> = {
-    idle: "border-paper/10",
-    started: "border-paper/30 animate-pulse",
-    signed: "border-accent/60 bg-accent/5",
-    rejected: "border-red-500/40 bg-red-500/5",
-  };
-  const statusLabel: Record<Status, string> = {
-    idle: "waiting",
-    started: "judging…",
-    signed: "✓ signed",
-    rejected: "✗ rejected",
-  };
+  const className =
+    agent.status === "signed" ? "border-accent/60 bg-accent/5" : "border-paper/10 animate-pulse";
   return (
-    <div className={`rounded border ${colorByStatus[agent.status]} p-3 text-xs space-y-2`}>
+    <div className={`rounded border ${className} p-3 text-xs space-y-2`}>
       <div className="flex justify-between items-baseline">
         <span className="font-semibold">agent {agent.agentId}</span>
-        <span
-          className={
-            agent.status === "signed"
-              ? "text-accent"
-              : agent.status === "rejected"
-                ? "text-red-400"
-                : "text-muted"
-          }
-        >
-          {statusLabel[agent.status]}
+        <span className={agent.status === "signed" ? "text-accent" : "text-muted"}>
+          {agent.status === "signed" ? "✓ signed" : "waiting…"}
         </span>
       </div>
-      {agent.reasoning && (
-        <pre className="whitespace-pre-wrap text-[10px] text-muted leading-snug max-h-32 overflow-y-auto">
-          {agent.reasoning}
-        </pre>
-      )}
-      {agent.finalReason && <p className="text-[11px]">{agent.finalReason}</p>}
       {agent.signature && (
         <p className="text-[10px] font-mono break-all text-muted">
           sig {shortHash(agent.signature as `0x${string}`)}

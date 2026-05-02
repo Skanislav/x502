@@ -12,16 +12,13 @@
     "dev": "tsx watch src/main.ts",
     "start": "tsx src/main.ts",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "test:integration": "vitest run --config vitest.integration.config.ts"
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
     "@x502/shared": "workspace:*",
-    "@x502/verifier-agent": "workspace:*",
     "hono": "^4.6.0",
     "viem": "^2.21.0",
-    "x402-fetch": "^1.2.0",
     "x402-hono": "^1.2.0"
   },
   "devDependencies": {

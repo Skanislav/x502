@@ -1,5 +1,7 @@
-import { type Attestation, attestationTypedData } from "@x502/shared";
 import { type Account, type Address, type Hex, type WalletClient, encodeAbiParameters } from "viem";
+
+import { attestationTypedData } from "./eip712.js";
+import type { Attestation } from "./types.js";
 
 /// Wrap config for verifiers whose registered identity is an ERC-1271 smart
 /// account that may not be deployed yet. After producing the inner ECDSA

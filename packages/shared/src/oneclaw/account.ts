@@ -9,9 +9,9 @@ import { toAccount } from "viem/accounts";
 import type { OneClawClient } from "./client.js";
 
 /// Builds a viem `LocalAccount` whose signing operations delegate to a
-/// OneClawClient scope. Used by the verifier-agent wallet provider AND the
-/// coordinator's submitter — the only difference between callers is the
-/// scopeId.
+/// OneClawClient scope. Used by the coordinator's submitter AND by the
+/// x502-verify Claude skill helper — the only difference between callers
+/// is the scopeId.
 ///
 /// viem's signMessage/signTypedData are parametric over types we don't want
 /// to mirror in the OneClawClient interface; the runtime payload shapes are

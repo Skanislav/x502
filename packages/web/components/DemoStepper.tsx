@@ -41,7 +41,7 @@ const STEPS: Array<{ key: StepKey; title: string; copy: string }> = [
   {
     key: "verifiers",
     title: "6 · Verifiers sign",
-    copy: "Each verifier-agent fetches the issue, asks Claude whether the claim holds, checks the wallet binding via the agent registry, and signs an EIP-712 attestation. Coordinator collects M of N signatures.",
+    copy: "Each verifier identity runs the `x502-verify` skill in their local Claude. The skill fetches the issue, applies the kind-specific rubric, signs an EIP-712 attestation, and POSTs it to the coordinator. Coordinator collects M of N.",
   },
   {
     key: "payout",

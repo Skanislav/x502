@@ -110,8 +110,5 @@ jobs:
       - name: vitest (shared)
         run: pnpm --filter @x502/shared exec vitest run
 
-      - name: vitest (verifier-agent)
-        run: pnpm --filter @x502/verifier-agent exec vitest run
-
-      - name: vitest (coordinator e2e)
+      - name: vitest (coordinator)
         run: pnpm --filter @x502/coordinator exec vitest run
