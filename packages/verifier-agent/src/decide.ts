@@ -10,6 +10,11 @@ export interface VerifyContext {
   /// Reveal for the GH-body commitment, if the claim type requires identity binding.
   agentIdReveal?: bigint;
   saltReveal?: Hex;
+  /// Optional sink for streaming reasoning chunks. The verifier server passes
+  /// a function that publishes `verifier.reasoning` events to its SSE bus, so
+  /// the demo UI can render Claude's extended-thinking output in real time.
+  /// Policies that don't stream (AcceptAll, RejectAll) can ignore this.
+  onReasoningChunk?: (chunk: string) => void;
 }
 
 export type DecisionOutcome = { accept: true; reason: string } | { accept: false; reason: string };

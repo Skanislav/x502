@@ -121,12 +121,15 @@ export class ClaudePolicy implements DecisionPolicy {
 
     const commitmentVerified = this.checkCommitment(ctx, body);
 
-    return this.judge({
-      kind: KindName[ctx.kind],
-      recipient: ctx.recipient,
-      context: summary,
-      commitmentVerified,
-    });
+    return this.judge(
+      {
+        kind: KindName[ctx.kind],
+        recipient: ctx.recipient,
+        context: summary,
+        commitmentVerified,
+      },
+      ctx.onReasoningChunk,
+    );
   }
 
   private checkCommitment(ctx: VerifyContext, body: string): boolean {
@@ -178,7 +181,10 @@ export class ClaudePolicy implements DecisionPolicy {
     return { ok: true };
   }
 
-  private async judge(input: JudgmentInput): Promise<DecisionOutcome> {
+  private async judge(
+    input: JudgmentInput,
+    onChunk?: (chunk: string) => void,
+  ): Promise<DecisionOutcome> {
     const userPrompt = [
       `Claim type: ${input.kind}`,
       `Recipient: ${input.recipient}`,
@@ -190,10 +196,10 @@ export class ClaudePolicy implements DecisionPolicy {
       "Should this claim be accepted? Respond with strict JSON only.",
     ].join("\n");
 
-    const response = await this.opts.anthropic.messages.create({
+    const args = {
       model: "claude-opus-4-7",
       max_tokens: this.opts.maxTokens ?? 4000,
-      thinking: { type: "adaptive" },
+      thinking: { type: "adaptive" as const },
       output_config: {
         effort: this.opts.effort ?? "medium",
         format: {
@@ -211,29 +217,53 @@ export class ClaudePolicy implements DecisionPolicy {
       },
       system: [
         {
-          type: "text",
+          type: "text" as const,
           text: SYSTEM_PROMPT,
-          cache_control: { type: "ephemeral" },
+          cache_control: { type: "ephemeral" as const },
         },
       ],
-      messages: [{ role: "user", content: userPrompt }],
-    });
+      messages: [{ role: "user" as const, content: userPrompt }],
+    };
 
-    const textBlock = response.content.find((b) => b.type === "text");
-    if (!textBlock || textBlock.type !== "text") {
-      return { accept: false, reason: "no text response from Claude" };
-    }
-    try {
-      const parsed = JSON.parse(textBlock.text) as { accept?: boolean; reason?: string };
-      if (parsed.accept === true) {
-        return { accept: true, reason: parsed.reason ?? "accepted by Claude" };
+    // Streaming path — used whenever the caller wants per-token reasoning
+    // chunks (i.e. the verifier theater). Falls back to a clear rejection
+    // if the SDK throws so we never crash the verifier process.
+    if (onChunk) {
+      try {
+        const stream = this.opts.anthropic.messages.stream(args as never);
+        for await (const event of stream) {
+          if (event.type === "content_block_delta" && event.delta.type === "thinking_delta") {
+            onChunk(event.delta.thinking);
+          }
+        }
+        const finalMessage = await stream.finalMessage();
+        return parseFinal(finalMessage.content);
+      } catch (e) {
+        return { accept: false, reason: `Claude stream failed: ${(e as Error).message}` };
       }
-      return { accept: false, reason: parsed.reason ?? "rejected by Claude" };
-    } catch {
-      return {
-        accept: false,
-        reason: `bad JSON from Claude: ${textBlock.text.slice(0, 200)}`,
-      };
     }
+
+    // Non-streaming path — the path existing tests mock against.
+    const response = await this.opts.anthropic.messages.create(args as never);
+    return parseFinal(response.content);
+  }
+}
+
+function parseFinal(content: Array<{ type: string; text?: string }>): DecisionOutcome {
+  const textBlock = content.find((b) => b.type === "text");
+  if (!textBlock || textBlock.type !== "text" || textBlock.text === undefined) {
+    return { accept: false, reason: "no text response from Claude" };
+  }
+  try {
+    const parsed = JSON.parse(textBlock.text) as { accept?: boolean; reason?: string };
+    if (parsed.accept === true) {
+      return { accept: true, reason: parsed.reason ?? "accepted by Claude" };
+    }
+    return { accept: false, reason: parsed.reason ?? "rejected by Claude" };
+  } catch {
+    return {
+      accept: false,
+      reason: `bad JSON from Claude: ${textBlock.text.slice(0, 200)}`,
+    };
   }
 }

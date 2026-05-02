@@ -23,11 +23,15 @@ describe("stepFromPipeline", () => {
     expect(stepFromPipeline({ status: "verifying", factReady: true, sigs: 0 })).toBe("verifiers");
   });
 
-  it("stays at fact when verifying but fact not ready", () => {
-    expect(stepFromPipeline({ status: "verifying" })).toBe("fact");
+  it("returns submit when verifying but fact not ready", () => {
+    // Post-claim, pre-fact: the user's done with the form, the coordinator
+    // is mid-pipeline — submit is the most accurate label.
+    expect(stepFromPipeline({ status: "verifying" })).toBe("submit");
   });
 
-  it("returns submit when idle", () => {
-    expect(stepFromPipeline({ status: "idle" })).toBe("submit");
+  it("returns commitment when idle (the user's still preparing)", () => {
+    // Idle = pre-submission. The inline CommitmentForm lives in this step,
+    // so the stepper highlights it as the active workspace.
+    expect(stepFromPipeline({ status: "idle" })).toBe("commitment");
   });
 });

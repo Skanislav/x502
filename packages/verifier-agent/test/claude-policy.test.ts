@@ -28,6 +28,49 @@ function octokitIssue(body: string, labels: unknown[] = ["bug"]) {
   };
 }
 
+/// Builds an anthropic stub whose `messages.stream(...)` returns an
+/// async-iterable of fake events plus a `finalMessage()` resolving to the
+/// JSON verdict. Mirrors the @anthropic-ai/sdk `MessageStream` surface used
+/// by ClaudePolicy.judge.
+function anthropicStreaming(opts: {
+  thinkingChunks?: string[];
+  finalText: string;
+  throwMid?: Error;
+}) {
+  const stream = vi.fn((_args: unknown) => {
+    const events: Array<unknown> = [];
+    for (const chunk of opts.thinkingChunks ?? []) {
+      events.push({
+        type: "content_block_delta",
+        delta: { type: "thinking_delta", thinking: chunk },
+      });
+    }
+    return {
+      [Symbol.asyncIterator]() {
+        let i = 0;
+        return {
+          async next() {
+            if (opts.throwMid && i === 1) throw opts.throwMid;
+            if (i >= events.length) return { value: undefined, done: true };
+            return { value: events[i++], done: false };
+          },
+        };
+      },
+      finalMessage: vi.fn(async () => ({
+        content: [{ type: "text", text: opts.finalText }],
+      })),
+    };
+  });
+  return {
+    messages: {
+      // Streaming path uses .stream(); non-streaming path uses .create().
+      // Existing tests rely on .create() so we keep both.
+      create: vi.fn(),
+      stream,
+    },
+  };
+}
+
 function userPromptOf(anthropic: ReturnType<typeof anthropicWithText>) {
   const req = anthropic.messages.create.mock.calls[0]?.[0] as {
     messages: Array<{ role: string; content: string }>;
@@ -404,5 +447,80 @@ describe("ClaudePolicy", () => {
     expect(octokit.rest.issues.listComments).not.toHaveBeenCalled();
     expect(userPromptOf(anthropic)).toContain("Body:\n(empty)");
     expect(userPromptOf(anthropic)).not.toContain("comment-only");
+  });
+
+  describe("onReasoningChunk streaming", () => {
+    it("uses messages.stream and forwards thinking_delta chunks to the callback", async () => {
+      const anthropic = anthropicStreaming({
+        thinkingChunks: ["The issue is ", "open ", "and reproducible."],
+        finalText: JSON.stringify({ accept: true, reason: "looks fine" }),
+      });
+      const policy = new ClaudePolicy({
+        anthropic: anthropic as never,
+        octokit: octokitIssue("body") as never,
+      });
+
+      const chunks: string[] = [];
+      const result = await policy.decide({
+        repoSlug: "owner/repo",
+        externalId: 2n,
+        kind: Kind.Report,
+        recipient: RECIPIENT,
+        factHash: FACT_HASH,
+        onReasoningChunk: (c) => chunks.push(c),
+      });
+
+      expect(result).toEqual({ accept: true, reason: "looks fine" });
+      expect(chunks).toEqual(["The issue is ", "open ", "and reproducible."]);
+      expect(anthropic.messages.stream).toHaveBeenCalled();
+      expect(anthropic.messages.create).not.toHaveBeenCalled();
+    });
+
+    it("uses non-streaming messages.create when no callback is provided", async () => {
+      // Streaming is opt-in: existing callers (and AcceptAllPolicy mocks)
+      // still hit the legacy path, so their tests don't need to mock stream.
+      const anthropic = anthropicWithText(JSON.stringify({ accept: false, reason: "no" }));
+      const policy = new ClaudePolicy({
+        anthropic: anthropic as never,
+        octokit: octokitIssue("body") as never,
+      });
+
+      const result = await policy.decide({
+        repoSlug: "owner/repo",
+        externalId: 2n,
+        kind: Kind.Report,
+        recipient: RECIPIENT,
+        factHash: FACT_HASH,
+      });
+
+      expect(result).toEqual({ accept: false, reason: "no" });
+      expect(anthropic.messages.create).toHaveBeenCalled();
+    });
+
+    it("returns a clear rejection when the stream throws", async () => {
+      const anthropic = anthropicStreaming({
+        thinkingChunks: ["partial"],
+        finalText: "{}",
+        throwMid: new Error("upstream cancelled"),
+      });
+      const policy = new ClaudePolicy({
+        anthropic: anthropic as never,
+        octokit: octokitIssue("body") as never,
+      });
+
+      const chunks: string[] = [];
+      const result = await policy.decide({
+        repoSlug: "owner/repo",
+        externalId: 2n,
+        kind: Kind.Report,
+        recipient: RECIPIENT,
+        factHash: FACT_HASH,
+        onReasoningChunk: (c) => chunks.push(c),
+      });
+
+      expect(result.accept).toBe(false);
+      expect(result.reason).toContain("Claude stream failed");
+      expect(result.reason).toContain("upstream cancelled");
+    });
   });
 });

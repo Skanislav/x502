@@ -295,7 +295,17 @@ export default function Page() {
       {demoMode ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="space-y-6">
-            <DemoStepper current={stepperStep} />
+            <DemoStepper
+              current={stepperStep}
+              commitmentForm={{
+                repoSlug,
+                externalId,
+                recipient,
+                commitment: commitmentPreview,
+                salt: saltReveal,
+                onSaltChange: (s) => setSaltReveal(s),
+              }}
+            />
           </div>
           <div className="space-y-6">{claimForm}</div>
           <div className="space-y-6">
