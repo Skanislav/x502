@@ -3,6 +3,11 @@
 /// Reads RPC_URL from argv (or env), deploys mocks + vault, registers 3 agent
 /// keys in the registry, configures the demo repo, mints + deposits USDC, and
 /// writes `demo/.runtime/addresses.json` for downstream scripts.
+///
+/// Optional: `DEMO_SMART_WALLET=1` deploys MockSmartWalletFactory and turns
+/// the third verifier (agent 103) into a counterfactual ERC-1271 smart wallet.
+/// The wallet address is registered in the AgentRegistry but the contract is
+/// not deployed — the vault deploys it during the first 6492-wrapped payout.
 
 import { parseArgs } from "node:util";
 import {
@@ -14,13 +19,21 @@ import {
   type WalletClient,
   createPublicClient,
   createWalletClient,
+  encodeAbiParameters,
+  encodeFunctionData,
   parseUnits,
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
 
 import { deployAll, repoIdFromSlug } from "@x502/shared";
-import { bountyVaultAbi, mockAgentRegistryAbi, mockUSDCAbi } from "@x502/shared/abis";
+import {
+  bountyVaultAbi,
+  mockAgentRegistryAbi,
+  mockSmartWalletFactoryAbi,
+  mockSmartWalletFactoryBytecode,
+  mockUSDCAbi,
+} from "@x502/shared/abis";
 
 import { type DemoRuntime, writeRuntime } from "./lib/runtime.js";
 
@@ -60,17 +73,79 @@ async function main() {
   process.stdout.write(`[seed]   factProvider=${contracts.factProvider}\n`);
   process.stdout.write(`[seed]   vault=${contracts.vault}\n`);
 
-  const verifiers = VERIFIER_AGENT_IDS.map((agentId, i) => {
+  const useSmartWallet = process.env.DEMO_SMART_WALLET === "1";
+
+  // Optionally deploy the smart-wallet factory. We do this first so the
+  // verifier-wallet preparation step can predict the third verifier's
+  // contract address before registering it.
+  let smartWalletFactory: Address | undefined;
+  if (useSmartWallet) {
+    process.stdout.write("[seed] DEMO_SMART_WALLET=1 — deploying MockSmartWalletFactory\n");
+    const tx = await wallet.deployContract({
+      abi: mockSmartWalletFactoryAbi,
+      bytecode: mockSmartWalletFactoryBytecode,
+      account: deployer as Account,
+      chain: null,
+    });
+    const r = await publicClient.waitForTransactionReceipt({ hash: tx });
+    if (!r.contractAddress) throw new Error("factory deploy returned no address");
+    smartWalletFactory = r.contractAddress;
+    process.stdout.write(`[seed]   factory=${smartWalletFactory}\n`);
+  }
+
+  const verifiers: DemoRuntime["verifiers"] = [];
+  for (let i = 0; i < VERIFIER_AGENT_IDS.length; i++) {
+    const agentId = VERIFIER_AGENT_IDS[i]!;
     const pk = generatePrivateKey();
     const acc = privateKeyToAccount(pk);
-    return {
+    const isSmart = useSmartWallet && agentId === 103n;
+
+    if (!isSmart) {
+      verifiers.push({
+        agentId: agentId.toString(),
+        privateKey: pk,
+        address: acc.address as Address,
+        endpoint: `http://127.0.0.1:${VERIFIER_PORTS[i]}`,
+        port: VERIFIER_PORTS[i]!,
+      });
+      continue;
+    }
+
+    // Smart-wallet verifier — predict the wallet's address via CREATE2 and
+    // register that. The factory will deploy it when the vault hits the
+    // first 6492-wrapped sig from this verifier.
+    const salt = `0x${"a5".repeat(32)}` as Hex;
+    const predicted = (await publicClient.readContract({
+      address: smartWalletFactory!,
+      abi: mockSmartWalletFactoryAbi,
+      functionName: "predict",
+      args: [acc.address, salt],
+    } as never)) as Address;
+    const factoryCalldata = encodeFunctionData({
+      abi: mockSmartWalletFactoryAbi,
+      functionName: "deploy",
+      args: [acc.address, salt],
+    });
+    process.stdout.write(
+      `[seed]   verifier ${agentId}: smart-wallet ${predicted} (owner ${acc.address})\n`,
+    );
+
+    verifiers.push({
       agentId: agentId.toString(),
       privateKey: pk,
-      address: acc.address as Address,
+      address: predicted,
       endpoint: `http://127.0.0.1:${VERIFIER_PORTS[i]}`,
       port: VERIFIER_PORTS[i]!,
-    };
-  });
+      smartWallet: {
+        address: predicted,
+        ownerAddress: acc.address as Address,
+        factory: smartWalletFactory!,
+        factoryCalldata,
+      },
+    });
+    // Suppress unused-encoder warning when smart-wallet path isn't taken.
+    void encodeAbiParameters;
+  }
 
   process.stdout.write("[seed] registering verifier wallets\n");
   for (const v of verifiers) {
@@ -145,6 +220,7 @@ async function main() {
     verifiers,
     coordinator: { endpoint: `http://127.0.0.1:${coordinatorPort}`, port: coordinatorPort },
     web: { port: webPort },
+    smartWalletFactory,
   };
   writeRuntime(rt);
   process.stdout.write("[seed] wrote demo/.runtime/addresses.json\n");
