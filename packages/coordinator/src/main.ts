@@ -2,6 +2,12 @@
 ///
 ///   pnpm --filter @x502/coordinator start
 ///
+/// In the new architecture the coordinator is a passive aggregator: it
+/// listens for /claim, requests the fact from Chainlink Functions, opens an
+/// inbox per claim, and waits for verifier-side skill helpers to push
+/// signed attestations via POST /attestation. Once threshold sigs land the
+/// vault.payout submits.
+///
 /// Required env (see .env.example):
 ///   COORDINATOR_PORT                default 8787
 ///   RPC_URL                         JSON-RPC endpoint
@@ -11,17 +17,13 @@
 ///   COORDINATOR_REPO                owner/repo
 ///   COORDINATOR_THRESHOLD           M-of-N
 ///   COORDINATOR_TRUSTED_AGENT_IDS   comma-separated bigints
-///   COORDINATOR_VERIFIER_ENDPOINTS  comma-separated http://host:port URLs
-///   COORDINATOR_VERIFIER_AGENT_IDS  comma-separated bigints, same length
 ///   COORDINATOR_FACT_TIMEOUT_MS     default 120000
-///   COORDINATOR_VERIFIER_TIMEOUT_MS default 30000
+///   COORDINATOR_ATTESTATION_TIMEOUT_MS default 300000 (5min — humans drive verifiers)
 ///
-/// Wallet:
+/// Wallet (the coordinator's wallet still submits the on-chain payout tx):
 ///   ONECLAW_MODE                    local (default) | remote
 ///   COORDINATOR_ONECLAW_SCOPE_ID    1claw scope for the submitter wallet
-///                                   (default `COORDINATOR_PRIVATE_KEY`,
-///                                   which in local mode is also the env-var
-///                                   name holding the key).
+///                                   (default `COORDINATOR_PRIVATE_KEY`)
 
 import { serve } from "@hono/node-server";
 import { oneClawAccount, pickOneClawFromEnv } from "@x502/shared";
@@ -36,7 +38,6 @@ import {
 import { base, baseSepolia, foundry } from "viem/chains";
 
 import {
-  FetchVerifierClient,
   StaticRepoRegistry,
   ViemFactProvider,
   ViemVaultWriter,
@@ -68,9 +69,6 @@ async function main() {
   if (!isAddress(vault)) throw new Error("VAULT_ADDRESS must be a 0x-address");
   if (!isAddress(factProviderAddr)) throw new Error("FACT_PROVIDER_ADDRESS must be a 0x-address");
 
-  // Coordinator wallet flows through 1claw too — same custody surface as the
-  // verifiers. In local mode the scope id is the env-var name holding a raw
-  // key; in remote mode it's whatever identifier the 1claw service exposes.
   const oneClaw = pickOneClawFromEnv(env);
   const scopeId = env.COORDINATOR_ONECLAW_SCOPE_ID ?? "COORDINATOR_PRIVATE_KEY";
   const scope = await oneClaw.resolveScope(scopeId);
@@ -84,15 +82,6 @@ async function main() {
   const trustedAgentIds = required(env, "COORDINATOR_TRUSTED_AGENT_IDS")
     .split(",")
     .map((s) => BigInt(s.trim()));
-  const verifierEndpoints = required(env, "COORDINATOR_VERIFIER_ENDPOINTS")
-    .split(",")
-    .map((s) => s.trim());
-  const verifierAgentIds = required(env, "COORDINATOR_VERIFIER_AGENT_IDS")
-    .split(",")
-    .map((s) => BigInt(s.trim()));
-  if (verifierEndpoints.length !== verifierAgentIds.length) {
-    throw new Error("COORDINATOR_VERIFIER_ENDPOINTS and _AGENT_IDS must be same length");
-  }
 
   const repoRegistry = new StaticRepoRegistry();
   repoRegistry.add(repoSlug, threshold, trustedAgentIds);
@@ -112,24 +101,19 @@ async function main() {
     vault as Address,
   );
 
-  const verifiers = verifierEndpoints.map(
-    (endpoint, i) => new FetchVerifierClient(verifierAgentIds[i]!, endpoint),
-  );
-
   const coord = buildCoordinator({
     factProvider,
     vault: vaultWriter,
     repoRegistry,
-    verifiers,
     factTimeoutMs: Number(env.COORDINATOR_FACT_TIMEOUT_MS ?? "120000"),
-    verifierTimeoutMs: Number(env.COORDINATOR_VERIFIER_TIMEOUT_MS ?? "30000"),
+    attestationTimeoutMs: Number(env.COORDINATOR_ATTESTATION_TIMEOUT_MS ?? "300000"),
   });
 
   // eslint-disable-next-line no-console
   console.log(
     `[x502 coordinator] port=${port} chainId=${chainId} vault=${vault} ` +
       `factProvider=${factProviderAddr} repo=${repoSlug} threshold=${threshold} ` +
-      `verifiers=${verifierEndpoints.length} wallet=oneclaw:${scope.kind}@${scope.address}`,
+      `trustedAgents=${trustedAgentIds.join(",")} wallet=oneclaw:${scope.kind}@${scope.address}`,
   );
   serve({ fetch: coord.app.fetch, port });
 }

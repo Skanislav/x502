@@ -43,7 +43,7 @@ export interface OneClawClient {
   /// EIP-712 sign. For smart accounts this returns an ERC-1271 wrapped sig.
   signTypedData(scopeId: string, typedData: TypedDataDefinition): Promise<Hex>;
   /// EIP-191 personal_sign. Currently unused by the codebase but part of the
-  /// contract because the verifier-agent's viem Account interface needs it.
+  /// contract because consumers' viem Account interface needs it.
   signMessage(scopeId: string, message: { message: string | { raw: Hex } }): Promise<Hex>;
   /// Returns a fully signed raw tx for EOA scopes. Throws for smart accounts
   /// — those go through `sendUserOperation` (not implemented yet).

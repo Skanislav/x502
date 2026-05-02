@@ -1,8 +1,7 @@
-/// HTTP-handler unit tests for the coordinator. Same mock-based approach as
-/// pipeline.test.ts — no anvil, no http port. We exercise via Hono's
-/// `app.request()` and assert response status + headers + bodies for the
-/// branches the integration test doesn't cover (bad input, unknown repo,
-/// unknown claim, polling state machine, dedup).
+/// HTTP-handler unit tests for the coordinator. Inbox-driven flow: claims
+/// are pushed in via POST /claim, the inbox waits for verifier-side skill
+/// helpers to POST attestations, vault.payout fires once threshold sigs
+/// arrive.
 
 import type { Address, Hex } from "viem";
 import { describe, expect, it } from "vitest";
@@ -10,12 +9,7 @@ import { describe, expect, it } from "vitest";
 import { Kind, type SignedAttestation, deriveClaimId, repoIdFromSlug } from "@x502/shared";
 
 import { StaticRepoRegistry } from "../src/adapters/repo-registry.js";
-import type {
-  IFactProvider,
-  IVaultWriter,
-  IVerifierClient,
-  VerifyRequest,
-} from "../src/providers.js";
+import type { IFactProvider, IVaultWriter } from "../src/providers.js";
 import { buildCoordinator } from "../src/server.js";
 
 const RECIPIENT = "0x24582544C98a86eE59687c4D5B55D78f4FffA666" as Address;
@@ -30,31 +24,10 @@ class ImmediateFactProvider implements IFactProvider {
   }
 }
 
-/// Never resolves the fact — keeps claims pinned in `verifying` so we can
-/// assert the polling response shape.
 class NeverFactProvider implements IFactProvider {
   async requestFact(): Promise<void> {}
   awaitFact(): Promise<Hex> {
     return new Promise(() => {});
-  }
-}
-
-class AcceptVerifier implements IVerifierClient {
-  constructor(
-    public readonly agentId: bigint,
-    public readonly endpoint: string,
-  ) {}
-  async verify(req: VerifyRequest): Promise<SignedAttestation> {
-    return {
-      agentId: this.agentId,
-      signature: `0x${"ab".repeat(65)}` as Hex,
-      attestation: {
-        claimId: req.repoId,
-        recipient: req.recipient,
-        deadline: req.deadline,
-        factHash: req.factHash,
-      },
-    };
   }
 }
 
@@ -64,23 +37,15 @@ class OkVault implements IVaultWriter {
   }
 }
 
-function makeCoord(opts?: {
-  factProvider?: IFactProvider;
-  verifiers?: IVerifierClient[];
-}) {
+function makeCoord(opts?: { factProvider?: IFactProvider }) {
   const repoRegistry = new StaticRepoRegistry();
   repoRegistry.add(REPO_SLUG, 2, [101n, 102n, 103n]);
   return buildCoordinator({
     factProvider: opts?.factProvider ?? new ImmediateFactProvider(),
     vault: new OkVault(),
     repoRegistry,
-    verifiers: opts?.verifiers ?? [
-      new AcceptVerifier(101n, "v1"),
-      new AcceptVerifier(102n, "v2"),
-      new AcceptVerifier(103n, "v3"),
-    ],
     factTimeoutMs: 1_000,
-    verifierTimeoutMs: 1_000,
+    attestationTimeoutMs: 1_000,
     deadlineWindowSec: 60,
     pollRetryAfterSec: 1,
   });
@@ -94,13 +59,44 @@ async function postClaim(coord: ReturnType<typeof makeCoord>, body: Record<strin
   });
 }
 
+async function postAttestation(coord: ReturnType<typeof makeCoord>, signed: SignedAttestation) {
+  return coord.app.request("/attestation", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      claimId: signed.attestation.claimId,
+      agentId: signed.agentId.toString(),
+      signature: signed.signature,
+      attestation: {
+        claimId: signed.attestation.claimId,
+        recipient: signed.attestation.recipient,
+        deadline: signed.attestation.deadline.toString(),
+        factHash: signed.attestation.factHash,
+      },
+    }),
+  });
+}
+
+function fakeAttestation(
+  claimId: Hex,
+  agentId: bigint,
+  factHash: Hex,
+  recipient: Address,
+  deadline: bigint,
+): SignedAttestation {
+  return {
+    agentId,
+    signature: `0x${agentId.toString(16).padStart(2, "0").repeat(65)}` as Hex,
+    attestation: { claimId, recipient, deadline, factHash },
+  };
+}
+
 describe("GET /health", () => {
-  it("reports verifier count + claim count", async () => {
+  it("reports knownClaims", async () => {
     const coord = makeCoord();
     const r = await coord.app.request("/health");
     expect(r.status).toBe(200);
-    const j = (await r.json()) as { verifiers: number; knownClaims: number };
-    expect(j.verifiers).toBe(3);
+    const j = (await r.json()) as { knownClaims: number };
     expect(j.knownClaims).toBe(0);
   });
 });
@@ -152,27 +148,6 @@ describe("POST /claim — input validation", () => {
     });
     expect(r.status).toBe(404);
   });
-
-  it("503s when too few trusted verifiers are reachable", async () => {
-    // Repo trusts 3 agents but the coordinator only knows 1.
-    const repoRegistry = new StaticRepoRegistry();
-    repoRegistry.add(REPO_SLUG, 2, [101n, 102n, 103n]);
-    const coord = buildCoordinator({
-      factProvider: new ImmediateFactProvider(),
-      vault: new OkVault(),
-      repoRegistry,
-      verifiers: [new AcceptVerifier(101n, "v1")],
-      factTimeoutMs: 1_000,
-      verifierTimeoutMs: 1_000,
-    });
-    const r = await postClaim(coord, {
-      repoSlug: REPO_SLUG,
-      externalId: "1",
-      kind: "fix",
-      recipient: RECIPIENT,
-    });
-    expect(r.status).toBe(503);
-  });
 });
 
 describe("POST /claim — successful submission", () => {
@@ -192,27 +167,6 @@ describe("POST /claim — successful submission", () => {
     expect(j.status).toBe("verifying");
   });
 
-  it("accepts numeric externalId, numeric agentIdReveal, and saltReveal", async () => {
-    const coord = makeCoord({ factProvider: new NeverFactProvider() });
-    const saltReveal = `0x${"77".repeat(32)}` as Hex;
-
-    const r = await postClaim(coord, {
-      repoSlug: REPO_SLUG,
-      externalId: 43,
-      kind: "fix",
-      recipient: RECIPIENT,
-      agentIdReveal: 101,
-      saltReveal,
-    });
-
-    expect(r.status).toBe(200);
-    const j = (await r.json()) as { claimId: Hex };
-    const state = coord.claims.get(j.claimId);
-    expect(state?.request.externalId).toBe(43n);
-    expect(state?.request.agentIdReveal).toBe(101n);
-    expect(state?.request.saltReveal).toBe(saltReveal);
-  });
-
   it("dedups concurrent claims by claimId", async () => {
     const coord = makeCoord({ factProvider: new NeverFactProvider() });
     const body = {
@@ -228,6 +182,136 @@ describe("POST /claim — successful submission", () => {
     };
     expect(second.claimId).toBe(first.claimId);
     expect(second.note).toMatch(/already in flight/);
+  });
+});
+
+describe("GET /pending-claims/:agentId", () => {
+  it("returns claims awaiting an attestation from this agent (fact delivered, in trusted set)", async () => {
+    const coord = makeCoord();
+    await postClaim(coord, {
+      repoSlug: REPO_SLUG,
+      externalId: "42",
+      kind: "fix",
+      recipient: RECIPIENT,
+    });
+
+    // wait for the inbox to open (fact delivered)
+    await waitFor(
+      () =>
+        coord.inbox.isOpen.bind(coord.inbox)(
+          deriveClaimId(repoIdFromSlug(REPO_SLUG), 42n, Kind.Fix),
+        ),
+      1_000,
+    );
+
+    const r = await coord.app.request("/pending-claims/101");
+    expect(r.status).toBe(200);
+    const j = (await r.json()) as {
+      agentId: string;
+      pending: Array<{ claimId: Hex; repoSlug: string; factHash: Hex }>;
+    };
+    expect(j.pending).toHaveLength(1);
+    expect(j.pending[0]!.repoSlug).toBe(REPO_SLUG);
+    expect(j.pending[0]!.factHash).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+
+  it("excludes claims for repos that don't trust this agent", async () => {
+    const coord = makeCoord();
+    await postClaim(coord, {
+      repoSlug: REPO_SLUG,
+      externalId: "42",
+      kind: "fix",
+      recipient: RECIPIENT,
+    });
+    await waitFor(
+      () =>
+        coord.inbox.isOpen.bind(coord.inbox)(
+          deriveClaimId(repoIdFromSlug(REPO_SLUG), 42n, Kind.Fix),
+        ),
+      1_000,
+    );
+
+    const r = await coord.app.request("/pending-claims/999");
+    const j = (await r.json()) as { pending: unknown[] };
+    expect(j.pending).toHaveLength(0);
+  });
+
+  it("400s on a non-bigint agentId", async () => {
+    const coord = makeCoord();
+    const r = await coord.app.request("/pending-claims/abc");
+    expect(r.status).toBe(400);
+  });
+});
+
+describe("POST /attestation", () => {
+  it("end-to-end: 2 valid pushes drive the pipeline to paid", async () => {
+    const coord = makeCoord();
+    const post = (await (
+      await postClaim(coord, {
+        repoSlug: REPO_SLUG,
+        externalId: "42",
+        kind: "fix",
+        recipient: RECIPIENT,
+      })
+    ).json()) as { claimId: Hex };
+
+    // Wait for the inbox to open (fact delivered).
+    await waitFor(() => coord.inbox.isOpen(post.claimId), 1_000);
+
+    const state = coord.claims.get(post.claimId)!;
+    const factHash = state.factHash!;
+    const r1 = await postAttestation(
+      coord,
+      fakeAttestation(post.claimId, 101n, factHash, RECIPIENT, state.deadline),
+    );
+    expect(r1.status).toBe(200);
+    const r2 = await postAttestation(
+      coord,
+      fakeAttestation(post.claimId, 102n, factHash, RECIPIENT, state.deadline),
+    );
+    expect(r2.status).toBe(200);
+
+    // Pipeline runs async — poll until paid.
+    let body: { status: string; txHash?: Hex } | undefined;
+    for (let i = 0; i < 30; i++) {
+      const r = await coord.app.request(`/payout/${post.claimId}`);
+      if (r.status === 200) {
+        body = (await r.json()) as { status: string; txHash?: Hex };
+        break;
+      }
+      await new Promise((res) => setTimeout(res, 50));
+    }
+    expect(body?.status).toBe("paid");
+    expect(body?.txHash).toBe(TX_HASH);
+  });
+
+  it("409s when the agent is not in the repo's trusted set", async () => {
+    const coord = makeCoord();
+    const post = (await (
+      await postClaim(coord, {
+        repoSlug: REPO_SLUG,
+        externalId: "44",
+        kind: "fix",
+        recipient: RECIPIENT,
+      })
+    ).json()) as { claimId: Hex };
+    await waitFor(() => coord.inbox.isOpen(post.claimId), 1_000);
+    const state = coord.claims.get(post.claimId)!;
+    const r = await postAttestation(
+      coord,
+      fakeAttestation(post.claimId, 999n, state.factHash!, RECIPIENT, state.deadline),
+    );
+    expect(r.status).toBe(409);
+  });
+
+  it("400s on malformed payloads", async () => {
+    const coord = makeCoord();
+    const r = await coord.app.request("/attestation", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ claimId: "not-hex" }),
+    });
+    expect(r.status).toBe(400);
   });
 });
 
@@ -257,29 +341,13 @@ describe("GET /payout/:claimId polling", () => {
     expect(body.factReady).toBe(false);
     expect(body.sigs).toBe(0);
   });
-
-  it("200 with txHash once paid", async () => {
-    const coord = makeCoord(); // immediate fact + 3 accept verifiers
-    const post = (await (
-      await postClaim(coord, {
-        repoSlug: REPO_SLUG,
-        externalId: "42",
-        kind: "fix",
-        recipient: RECIPIENT,
-      })
-    ).json()) as { claimId: Hex };
-
-    // Pipeline runs async — poll a few times until status flips.
-    let body: { status: string; txHash?: Hex } | undefined;
-    for (let i = 0; i < 30; i++) {
-      const r = await coord.app.request(`/payout/${post.claimId}`);
-      if (r.status === 200) {
-        body = (await r.json()) as { status: string; txHash?: Hex };
-        break;
-      }
-      await new Promise((res) => setTimeout(res, 50));
-    }
-    expect(body?.status).toBe("paid");
-    expect(body?.txHash).toBe(TX_HASH);
-  });
 });
+
+async function waitFor(pred: () => boolean, timeoutMs: number): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (pred()) return;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error(`waitFor timed out after ${timeoutMs}ms`);
+}

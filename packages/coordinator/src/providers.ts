@@ -12,25 +12,6 @@ export interface IFactProvider {
   awaitFact(claimId: Hex, timeoutMs: number): Promise<Hex>;
 }
 
-/// Wraps a single verifier agent. Real impl uses fetch (optionally x402-wrapped);
-/// mock impl can call the in-process Hono app directly.
-export interface IVerifierClient {
-  agentId: bigint;
-  endpoint: string;
-  verify(req: VerifyRequest): Promise<SignedAttestation | { rejected: string }>;
-}
-
-export interface VerifyRequest {
-  repoId: Hex;
-  externalId: bigint;
-  kind: Kind;
-  recipient: Address;
-  deadline: bigint;
-  factHash: Hex;
-  agentIdReveal?: bigint;
-  saltReveal?: Hex;
-}
-
 /// Submits the assembled payout bundle on chain.
 export interface IVaultWriter {
   submitPayout(args: {

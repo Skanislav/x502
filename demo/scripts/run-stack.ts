@@ -1,5 +1,12 @@
 /// Boots the local x502 demo stack:
-///   anvil → deploy/seed → coordinator → 3 verifiers → auto-fulfill → web
+///   anvil → deploy/seed → coordinator → auto-fulfill → web
+///
+/// In the new skill-driven architecture there are no verifier-agent
+/// processes. Each verifier identity is run by a human via the
+/// `x502-verify` Claude skill (`.claude/skills/x502-verify/SKILL.md`).
+/// addresses.json carries the per-verifier signing keys + scope ids;
+/// when the operator invokes the skill the keys are loaded into env and
+/// the helper at `demo/scripts/x502.ts` does the signing + push.
 ///
 /// Logs from each subprocess are tee'd to stdout (prefixed) and to
 /// demo/.runtime/logs/<name>.log. Ctrl-C tears everything down.
@@ -128,10 +135,16 @@ async function main() {
   });
   const rt = readRuntime();
 
-  // 3) coordinator
-  // For the local demo, 1claw runs in `local` mode — the coordinator's
-  // signing key is read from the env var named in COORDINATOR_ONECLAW_SCOPE_ID.
-  // We pass the anvil deployer key through that env var.
+  // 3) coordinator. We pass each verifier's private key on the
+  // coordinator's env, scoped by `VERIFIER_<id>_PRIVATE_KEY`. That env
+  // surface flows through to whatever process invokes the x502-verify
+  // skill on this machine, since the skill helper (demo/scripts/x502.ts)
+  // reads the same scope ids via 1claw local mode.
+  const verifierKeyEnv: Record<string, string> = {};
+  for (const v of rt.verifiers) {
+    verifierKeyEnv[`VERIFIER_${v.agentId}_PRIVATE_KEY`] = v.privateKey;
+  }
+
   process.stdout.write(`[run-stack] starting coordinator on :${rt.coordinator.port}\n`);
   const coordinator = spawnNode("coordinator", "packages/coordinator/src/main.ts", {
     COORDINATOR_PORT: String(rt.coordinator.port),
@@ -145,50 +158,17 @@ async function main() {
     COORDINATOR_REPO: rt.repo.slug,
     COORDINATOR_THRESHOLD: String(rt.repo.threshold),
     COORDINATOR_TRUSTED_AGENT_IDS: rt.repo.trustedAgentIds.join(","),
-    COORDINATOR_VERIFIER_ENDPOINTS: rt.verifiers.map((v) => v.endpoint).join(","),
-    COORDINATOR_VERIFIER_AGENT_IDS: rt.verifiers.map((v) => v.agentId).join(","),
     COORDINATOR_FACT_TIMEOUT_MS: "30000",
-    COORDINATOR_VERIFIER_TIMEOUT_MS: "20000",
+    COORDINATOR_ATTESTATION_TIMEOUT_MS: "300000",
   });
   procs.push({ name: "coordinator", child: coordinator });
 
-  // 4) 3 verifier-agents
-  for (const v of rt.verifiers) {
-    process.stdout.write(
-      `[run-stack] starting verifier ${v.agentId} on :${v.port}${v.smartWallet ? " (smart-wallet)" : ""}\n`,
-    );
-    // Each verifier gets its own scope name so 1claw local mode reads the
-    // right key. The scope name is also the env-var name we set below.
-    const scopeId = `VERIFIER_${v.agentId}_PRIVATE_KEY`;
-    const env: Record<string, string> = {
-      VERIFIER_AGENT_ID: v.agentId,
-      VERIFIER_VAULT_ADDRESS: rt.contracts.vault,
-      VERIFIER_CHAIN_ID: String(rt.chainId),
-      VERIFIER_PORT: String(v.port),
-      VERIFIER_REPO_SLUG: rt.repo.slug,
-      VERIFIER_AGENT_REGISTRY_ADDRESS: rt.contracts.registry,
-      ONECLAW_MODE: "local",
-      ONECLAW_SCOPE_ID: scopeId,
-      [scopeId]: v.privateKey,
-      RPC_URL: rt.rpcUrl,
-    };
-    if (v.smartWallet) {
-      // Verifier-agent reads these and wraps each EIP-712 sig with the
-      // ERC-6492 magic so the vault deploys the wallet before verifying.
-      env.VERIFIER_SMART_WALLET_ADDRESS = v.smartWallet.address;
-      env.VERIFIER_SMART_WALLET_FACTORY = v.smartWallet.factory;
-      env.VERIFIER_SMART_WALLET_FACTORY_CALLDATA = v.smartWallet.factoryCalldata;
-    }
-    const child = spawnNode(`verifier-${v.agentId}`, "packages/verifier-agent/src/main.ts", env);
-    procs.push({ name: `verifier-${v.agentId}`, child });
-  }
-
-  // 5) auto-fulfill (DON simulator)
+  // 4) auto-fulfill (DON simulator)
   process.stdout.write("[run-stack] starting auto-fulfill watcher\n");
   const fulfill = spawnNode("auto-fulfill", "demo/scripts/auto-fulfill.ts");
   procs.push({ name: "auto-fulfill", child: fulfill });
 
-  // 6) web (Next.js)
+  // 5) web (Next.js)
   if (process.env.SKIP_WEB !== "1") {
     process.stdout.write(`[run-stack] starting web on :${rt.web.port}\n`);
     const web = spawnPnpm(
@@ -202,11 +182,8 @@ async function main() {
     procs.push({ name: "web", child: web });
   }
 
-  // 7) Wait for health
+  // 6) Wait for health
   await waitForHealth(`${rt.coordinator.endpoint}/health`, "coordinator");
-  for (const v of rt.verifiers) {
-    await waitForHealth(`${v.endpoint}/health`, `verifier-${v.agentId}`);
-  }
 
   process.stdout.write("\n");
   process.stdout.write("┌─ x502 demo stack ready ────────────────────────────┐\n");
@@ -217,9 +194,42 @@ async function main() {
   process.stdout.write(`│ vault       ${rt.contracts.vault}     │\n`);
   process.stdout.write("│ logs        demo/.runtime/logs/                    │\n");
   process.stdout.write("└────────────────────────────────────────────────────┘\n");
+  process.stdout.write("\nVerifiers run as the x502-verify Claude skill.\n");
+  process.stdout.write("In a separate terminal:\n");
+  process.stdout.write("  source <(./demo/scripts/skill-env.sh)   # exports verifier keys\n");
+  process.stdout.write("  claude\n");
+  process.stdout.write("  > /x502-verify as agent 101\n\n");
   process.stdout.write("Ctrl-C to stop.\n");
 
+  // Write a helper script that exports the per-verifier keys for the
+  // operator's `claude` shell.
+  writeSkillEnvScript(rt);
+
   await new Promise(() => {});
+}
+
+function writeSkillEnvScript(rt: ReturnType<typeof readRuntime>): void {
+  const path = resolve(REPO_ROOT, "demo", "scripts", "skill-env.sh");
+  const lines = [
+    "# Auto-generated by run-stack. `source` this in a fresh shell, then run",
+    "# `claude` to invoke the x502-verify skill against the running coordinator.",
+    `export X502_COORDINATOR=${rt.coordinator.endpoint}`,
+    `export X502_VAULT=${rt.contracts.vault}`,
+    `export X502_CHAIN_ID=${rt.chainId}`,
+    `export X502_REPO=${rt.repo.slug}`,
+  ];
+  for (const v of rt.verifiers) {
+    lines.push(`export VERIFIER_${v.agentId}_PRIVATE_KEY=${v.privateKey}`);
+    if (v.smartWallet) {
+      lines.push(
+        `export VERIFIER_${v.agentId}_SMART_WALLET=${v.smartWallet.address}`,
+        `export VERIFIER_${v.agentId}_SMART_FACTORY=${v.smartWallet.factory}`,
+        `export VERIFIER_${v.agentId}_SMART_CALLDATA=${v.smartWallet.factoryCalldata}`,
+      );
+    }
+  }
+  const fs = require("node:fs") as typeof import("node:fs");
+  fs.writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o755 });
 }
 
 main().catch((e) => {
