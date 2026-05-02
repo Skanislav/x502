@@ -203,7 +203,7 @@ async function main() {
   process.stdout.write("└────────────────────────────────────────────────────┘\n");
   process.stdout.write("\nVerifiers run as the x502-verify Claude skill.\n");
   process.stdout.write("In a separate terminal:\n");
-  process.stdout.write("  source <(./demo/scripts/skill-env.sh)   # exports verifier keys\n");
+  process.stdout.write("  source demo/scripts/skill-env.sh   # exports verifier keys\n");
   process.stdout.write("  claude\n");
   process.stdout.write("  > /x502-verify as agent 101\n\n");
   process.stdout.write("Ctrl-C to stop.\n");
