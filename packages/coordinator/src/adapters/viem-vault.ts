@@ -20,6 +20,7 @@ export class ViemVaultWriter implements IVaultWriter {
     deadline: bigint;
     factHash: Hex;
     attestationUIDs: Hex[];
+    onSubmitted?: (txHash: Hex) => void;
   }): Promise<Hex> {
     // simulate first so revert reasons surface cleanly.
     const { request } = await this.publicClient.simulateContract({
@@ -38,7 +39,11 @@ export class ViemVaultWriter implements IVaultWriter {
       account: this.account,
     });
     const txHash = await this.wallet.writeContract(request);
-    await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    args.onSubmitted?.(txHash);
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash: txHash });
+    if (receipt.status !== "success") {
+      throw new Error(`payout tx ${txHash} reverted on-chain`);
+    }
     return txHash;
   }
 }
