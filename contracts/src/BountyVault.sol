@@ -3,23 +3,29 @@ pragma solidity ^0.8.26;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {EIP712} from "@openzeppelin/contracts/utils/cryptography/EIP712.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {IAgentRegistry} from "./interfaces/IAgentRegistry.sol";
+import {Attestation as EasAttestation, IEAS} from "./interfaces/IEAS.sol";
 import {IGitHubFactProvider} from "./interfaces/IGitHubFactProvider.sol";
 import {Attestations} from "./lib/Attestations.sol";
-import {ERC6492SignatureChecker} from "./lib/ERC6492SignatureChecker.sol";
 import {FactBlob} from "./lib/FactBlob.sol";
 
 /// @title  BountyVault — x502 settlement contract.
 /// @notice Repo owners deposit USDC and configure per-kind prices + a trusted
-///         set of ERC-8004 verifier agents (M-of-N). Anyone can submit a
-///         payout bundle of (Chainlink-Functions fact + M verifier sigs);
-///         the vault pays the claimant the price minus per-verifier outcome
-///         fees, which go to each signing verifier's `getAgentWallet` address.
+///         set of ERC-8004 verifier agents (M-of-N). Anyone can call
+///         `payout(...)` once threshold EAS attestations exist for the
+///         claim; the vault validates each attestation against its global
+///         x502 schema, pays the claimant the price minus per-verifier
+///         outcome fees, which go to each attester's address.
 ///         One-shot per `claimId`.
-contract BountyVault is EIP712, ReentrancyGuard {
+///
+/// @dev    Verification uses Ethereum Attestation Service. Each verifier
+///         identity attests to the (claimId, factHash, accept=true) tuple
+///         under the vault's `schemaUID`. The vault re-fetches each
+///         attestation by UID and validates schema, revocation, claim
+///         binding, and trust before settling.
+contract BountyVault is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     enum Kind {
@@ -49,6 +55,13 @@ contract BountyVault is EIP712, ReentrancyGuard {
     IERC20 public immutable usdc;
     IAgentRegistry public immutable agentRegistry;
     IGitHubFactProvider public immutable factProvider;
+    IEAS public immutable eas;
+
+    /// EAS schema UID for x502 verifier attestations. Registered once by the
+    /// deployer in EAS's SchemaRegistry; attestations under any other schema
+    /// are rejected by `payout`.
+    /// Schema string: "bytes32 claimId,bytes32 factHash,bool accept"
+    bytes32 public immutable schemaUID;
 
     mapping(bytes32 => RepoConfig) private _repos;
     mapping(bytes32 => bool) public isPaid;
@@ -62,32 +75,43 @@ contract BountyVault is EIP712, ReentrancyGuard {
         Kind kind,
         address recipient,
         uint256 amount,
-        uint256[] agentIds
+        address[] attesters
     );
 
     error NotRepoOwner();
     error RepoNotConfigured();
     error AlreadyPaid(bytes32 claimId);
     error DeadlineExpired();
-    error InsufficientSignatures();
-    error DuplicateSigner(uint256 agentId);
-    error UntrustedAgent(uint256 agentId);
-    error InvalidSignature(uint256 agentId);
+    error InsufficientAttestations();
+    error DuplicateAttester(address attester);
+    error UntrustedAttester(address attester);
+    error WrongSchema(bytes32 schema);
+    error AttestationRevoked(bytes32 uid);
+    error AttestationDeclined(bytes32 uid);
+    error AttestationClaimMismatch(bytes32 uid);
+    error AttestationFactMismatch(bytes32 uid);
+    error AttestationExpired(bytes32 uid);
+    error UnknownAttestation(bytes32 uid);
     error FactNotReady();
     error FactHashMismatch();
     error FactStatusNotOk(uint8 status);
     error FactMergeMissing();
     error InsufficientRepoBalance();
-    error LengthMismatch();
     error ThresholdZero();
     error PriceUnderflow();
 
-    constructor(IERC20 _usdc, IAgentRegistry _registry, IGitHubFactProvider _facts)
-        EIP712("x502", "1")
-    {
+    constructor(
+        IERC20 _usdc,
+        IAgentRegistry _registry,
+        IGitHubFactProvider _facts,
+        IEAS _eas,
+        bytes32 _schemaUID
+    ) {
         usdc = _usdc;
         agentRegistry = _registry;
         factProvider = _facts;
+        eas = _eas;
+        schemaUID = _schemaUID;
     }
 
     // ---------- repo lifecycle ----------
@@ -133,16 +157,11 @@ contract BountyVault is EIP712, ReentrancyGuard {
         emit Withdrawn(repoId, msg.sender, amount);
     }
 
-    // ---------- payout ----------
+    // ---------- payout (permissionless) ----------
 
-    struct PayoutLocals {
-        bytes32 claimId;
-        bytes32 digest;
-        bytes factBlob;
-        uint256 totalOutcomeFees;
-        uint256 claimantAmount;
-    }
-
+    /// @notice Settle a claim once threshold EAS attestations exist for it.
+    ///         Permissionless — anyone (claimant, verifier, bot) can call.
+    ///         The vault is the only on-chain trust boundary.
     function payout(
         bytes32 repoId,
         uint256 externalId,
@@ -150,103 +169,107 @@ contract BountyVault is EIP712, ReentrancyGuard {
         address recipient,
         uint256 deadline,
         bytes32 factHash,
-        uint256[] calldata agentIds,
-        bytes[] calldata signatures
+        bytes32[] calldata attestationUIDs
     ) external nonReentrant {
         if (block.timestamp > deadline) revert DeadlineExpired();
-        if (agentIds.length != signatures.length) revert LengthMismatch();
 
         RepoConfig storage cfg = _repos[repoId];
         if (!cfg.exists) revert RepoNotConfigured();
-        if (agentIds.length < cfg.threshold) revert InsufficientSignatures();
+        if (attestationUIDs.length < cfg.threshold) revert InsufficientAttestations();
 
-        PayoutLocals memory L;
-        L.claimId = Attestations.claimId(repoId, externalId, uint8(kind));
-        if (isPaid[L.claimId]) revert AlreadyPaid(L.claimId);
+        bytes32 claimId = Attestations.claimId(repoId, externalId, uint8(kind));
+        if (isPaid[claimId]) revert AlreadyPaid(claimId);
 
         // Fact gating
-        bool ready;
-        (ready, L.factBlob) = factProvider.getFact(L.claimId);
+        (bool ready, bytes memory factBlob) = factProvider.getFact(claimId);
         if (!ready) revert FactNotReady();
-        if (keccak256(L.factBlob) != factHash) revert FactHashMismatch();
+        if (keccak256(factBlob) != factHash) revert FactHashMismatch();
 
-        // The DON's source.js returns status=1 only when its kind-specific rules
-        // pass (see chainlink/source-core.js::decideFact). Reject status=0 here
-        // so the vault enforces the objective half of the two-layer design.
-        FactBlob.Fact memory fb = FactBlob.decode(L.factBlob);
+        FactBlob.Fact memory fb = FactBlob.decode(factBlob);
         if (fb.status != 1) revert FactStatusNotOk(fb.status);
         if ((kind == Kind.Fix || kind == Kind.DocsTests) && fb.mergedBlock == 0) {
             revert FactMergeMissing();
         }
 
-        // Verify M-of-N signatures
-        L.digest = hashAttestation(
-            Attestations.Attestation({
-                claimId: L.claimId, recipient: recipient, deadline: deadline, factHash: factHash
-            })
-        );
-        _verifySignatures(cfg, agentIds, signatures, L.digest);
+        // Validate each attestation (schema, revocation, claim/fact binding,
+        // trust, dedup) and collect attester addresses for outcome fees.
+        address[] memory attesters = _validateAttestations(cfg, claimId, factHash, attestationUIDs);
 
         // Compute payouts
         uint256 price = _priceOf(cfg, kind);
-        L.totalOutcomeFees = cfg.outcomeFeePerVerifier * agentIds.length;
-        if (L.totalOutcomeFees >= price) revert PriceUnderflow();
-        L.claimantAmount = price - L.totalOutcomeFees;
+        uint256 totalOutcomeFees = cfg.outcomeFeePerVerifier * attesters.length;
+        if (totalOutcomeFees >= price) revert PriceUnderflow();
+        uint256 claimantAmount = price - totalOutcomeFees;
         if (cfg.balance < price) revert InsufficientRepoBalance();
 
         // Effects
-        isPaid[L.claimId] = true;
+        isPaid[claimId] = true;
         cfg.balance -= price;
 
         // Interactions
-        for (uint256 i; i < agentIds.length; ++i) {
-            address w = agentRegistry.getAgentWallet(agentIds[i]);
-            usdc.safeTransfer(w, cfg.outcomeFeePerVerifier);
+        for (uint256 i; i < attesters.length; ++i) {
+            usdc.safeTransfer(attesters[i], cfg.outcomeFeePerVerifier);
         }
-        usdc.safeTransfer(recipient, L.claimantAmount);
+        usdc.safeTransfer(recipient, claimantAmount);
 
-        emit Paid(L.claimId, repoId, kind, recipient, L.claimantAmount, agentIds);
+        emit Paid(claimId, repoId, kind, recipient, claimantAmount, attesters);
     }
 
-    function _verifySignatures(
+    function _validateAttestations(
         RepoConfig storage cfg,
-        uint256[] calldata agentIds,
-        bytes[] calldata signatures,
-        bytes32 digest
-    ) internal {
-        // Mark seen agents in transient memory; check trust + dedup + sig.
-        // O(N*M) trust check is fine — both arrays are small (≤ ~10).
-        //
-        // Note: not `view` because ERC6492SignatureChecker may CALL the
-        // factory embedded in a 6492 signature to deploy a counterfactual
-        // smart wallet. payout's `nonReentrant` modifier blocks that
-        // factory from re-entering the vault.
-        for (uint256 i; i < agentIds.length; ++i) {
-            uint256 id = agentIds[i];
+        bytes32 claimId,
+        bytes32 factHash,
+        bytes32[] calldata uids
+    ) internal view returns (address[] memory attesters) {
+        attesters = new address[](uids.length);
+        address[] memory trustedSet = _resolveTrustedSet(cfg);
 
-            // Dedup against earlier entries
+        for (uint256 i; i < uids.length; ++i) {
+            EasAttestation memory att = eas.getAttestation(uids[i]);
+            if (att.uid == bytes32(0)) revert UnknownAttestation(uids[i]);
+            if (att.schema != schemaUID) revert WrongSchema(att.schema);
+            if (att.revocationTime != 0) revert AttestationRevoked(uids[i]);
+            if (att.expirationTime != 0 && att.expirationTime < block.timestamp) {
+                revert AttestationExpired(uids[i]);
+            }
+
+            (bytes32 attClaimId, bytes32 attFactHash, bool accept) =
+                abi.decode(att.data, (bytes32, bytes32, bool));
+            if (attClaimId != claimId) revert AttestationClaimMismatch(uids[i]);
+            if (attFactHash != factHash) revert AttestationFactMismatch(uids[i]);
+            if (!accept) revert AttestationDeclined(uids[i]);
+
+            // dedup against earlier attesters
             for (uint256 j; j < i; ++j) {
-                if (agentIds[j] == id) revert DuplicateSigner(id);
+                if (attesters[j] == att.attester) revert DuplicateAttester(att.attester);
             }
 
-            // Trust check
-            if (!_isTrusted(cfg, id)) revert UntrustedAgent(id);
-
-            // Signature check — accepts EOA (ECDSA), deployed ERC-1271 smart
-            // accounts, AND counterfactual ERC-6492 wrapped sigs.
-            address signer = agentRegistry.getAgentWallet(id);
-            if (!ERC6492SignatureChecker.isValidSig(signer, digest, signatures[i])) {
-                revert InvalidSignature(id);
+            // trust check — attester must equal the wallet bound to one of
+            // the repo's trusted agentIds in the ERC-8004 registry.
+            bool found;
+            for (uint256 k; k < trustedSet.length; ++k) {
+                if (trustedSet[k] == att.attester) {
+                    found = true;
+                    break;
+                }
             }
+            if (!found) revert UntrustedAttester(att.attester);
+
+            attesters[i] = att.attester;
         }
     }
 
-    function _isTrusted(RepoConfig storage cfg, uint256 agentId) internal view returns (bool) {
+    function _resolveTrustedSet(RepoConfig storage cfg)
+        internal
+        view
+        returns (address[] memory)
+    {
         uint256 n = cfg.trustedAgents.length;
+        address[] memory addrs = new address[](n);
         for (uint256 i; i < n; ++i) {
-            if (cfg.trustedAgents[i] == agentId) return true;
+            addrs[i] = agentRegistry.getAgentWallet(cfg.trustedAgents[i]);
         }
-        return false;
+        return addrs;
     }
 
     function _priceOf(RepoConfig storage cfg, Kind kind) internal view returns (uint256) {
@@ -257,14 +280,6 @@ contract BountyVault is EIP712, ReentrancyGuard {
     }
 
     // ---------- views ----------
-
-    function hashAttestation(Attestations.Attestation memory att) public view returns (bytes32) {
-        return _hashTypedDataV4(Attestations.hashStruct(att));
-    }
-
-    function domainSeparator() external view returns (bytes32) {
-        return _domainSeparatorV4();
-    }
 
     function repoOwnerOf(bytes32 repoId) external view returns (address) {
         return _repos[repoId].owner;

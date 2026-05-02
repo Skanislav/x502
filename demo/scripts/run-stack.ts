@@ -215,18 +215,13 @@ function writeSkillEnvScript(rt: ReturnType<typeof readRuntime>): void {
     "# `claude` to invoke the x502-verify skill against the running coordinator.",
     `export X502_COORDINATOR=${rt.coordinator.endpoint}`,
     `export X502_VAULT=${rt.contracts.vault}`,
+    `export X502_EAS=${rt.contracts.eas}`,
+    `export X502_SCHEMA_UID=${rt.schemaUID}`,
     `export X502_CHAIN_ID=${rt.chainId}`,
     `export X502_REPO=${rt.repo.slug}`,
   ];
   for (const v of rt.verifiers) {
     lines.push(`export VERIFIER_${v.agentId}_PRIVATE_KEY=${v.privateKey}`);
-    if (v.smartWallet) {
-      lines.push(
-        `export VERIFIER_${v.agentId}_SMART_WALLET=${v.smartWallet.address}`,
-        `export VERIFIER_${v.agentId}_SMART_FACTORY=${v.smartWallet.factory}`,
-        `export VERIFIER_${v.agentId}_SMART_CALLDATA=${v.smartWallet.factoryCalldata}`,
-      );
-    }
   }
   const fs = require("node:fs") as typeof import("node:fs");
   fs.writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o755 });

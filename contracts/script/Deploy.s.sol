@@ -7,6 +7,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BountyVault} from "../src/BountyVault.sol";
 import {GitHubFactReceiver} from "../src/GitHubFactReceiver.sol";
 import {IAgentRegistry} from "../src/interfaces/IAgentRegistry.sol";
+import {IEAS} from "../src/interfaces/IEAS.sol";
 import {IGitHubFactProvider} from "../src/interfaces/IGitHubFactProvider.sol";
 
 /// @title  Deploy script for Base Sepolia (chainId 84532).
@@ -18,6 +19,9 @@ import {IGitHubFactProvider} from "../src/interfaces/IGitHubFactProvider.sol";
 ///           SECRETS_SLOT_ID           — DON-hosted secrets slot (default 0)
 ///           SECRETS_VERSION           — DON-hosted secrets version (0 = unused)
 ///           AUTHORIZER                — coordinator wallet allowed to call requestFact
+///           X502_SCHEMA_UID           — UID of the registered x502 EAS schema
+///                                       (register via packages/coordinator's
+///                                       eas-register helper if not yet done)
 ///         Usage:
 ///           forge script script/Deploy.s.sol \
 ///             --rpc-url $BASE_SEPOLIA_RPC_URL --broadcast --verify
@@ -26,6 +30,8 @@ contract Deploy is Script {
     address constant USDC_BASE_SEPOLIA = 0x036CbD53842c5426634e7929541eC2318f3dCF7e;
     address constant FUNCTIONS_ROUTER_BASE_SEPOLIA = 0xf9B8fc078197181C841c296C876945aaa425B278;
     address constant ERC8004_IDENTITY_BASE_SEPOLIA = 0x8004A818BFB912233c491871b3d84c89A494BD9e;
+    /// EAS canonical predeploy on Base + Optimism Superchain L2s.
+    address constant EAS_BASE_SEPOLIA = 0x4200000000000000000000000000000000000021;
     bytes32 constant DON_ID_BASE_SEPOLIA = bytes32("fun-base-sepolia-1");
 
     function run() external returns (BountyVault vault, GitHubFactReceiver factReceiver) {
@@ -54,10 +60,15 @@ contract Deploy is Script {
         });
         factReceiver.setAuthorizer(authorizer);
 
+        bytes32 schemaUID = vm.envBytes32("X502_SCHEMA_UID");
+        require(schemaUID != bytes32(0), "X502_SCHEMA_UID required");
+
         vault = new BountyVault(
             IERC20(USDC_BASE_SEPOLIA),
             IAgentRegistry(ERC8004_IDENTITY_BASE_SEPOLIA),
-            IGitHubFactProvider(address(factReceiver))
+            IGitHubFactProvider(address(factReceiver)),
+            IEAS(EAS_BASE_SEPOLIA),
+            schemaUID
         );
 
         vm.stopBroadcast();
@@ -68,6 +79,8 @@ contract Deploy is Script {
         console2.log("GitHubFactReceiver:", address(factReceiver));
         console2.log("USDC             :", USDC_BASE_SEPOLIA);
         console2.log("ERC-8004 Registry:", ERC8004_IDENTITY_BASE_SEPOLIA);
+        console2.log("EAS              :", EAS_BASE_SEPOLIA);
+        console2.logBytes32(schemaUID);
         console2.log("Functions Router :", FUNCTIONS_ROUTER_BASE_SEPOLIA);
         console2.log("Subscription ID  :", subId);
         console2.log("Authorizer       :", authorizer);
