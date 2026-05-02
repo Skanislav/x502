@@ -12,6 +12,49 @@ function bytes32FromMask(mask) {
   return `0x${mask.toString(16).padStart(64, "0")}`;
 }
 
+function wordFromUint(value) {
+  return BigInt(value).toString(16).padStart(64, "0");
+}
+
+function wordFromBytes32(value) {
+  const clean = value.replace(/^0x/, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(clean)) throw Error("bytes32 must be 64 hex chars");
+  return clean;
+}
+
+function wordFromAddress(value) {
+  return value.replace(/^0x/, "").toLowerCase().padStart(64, "0");
+}
+
+export function encodeFact(fact) {
+  return `0x${[
+    wordFromUint(fact.status),
+    wordFromUint(fact.mergedBlock),
+    wordFromBytes32(fact.labelMask),
+    wordFromAddress(fact.ghAuthorBinding),
+  ].join("")}`;
+}
+
+export function hexToBytes(hex) {
+  const clean = hex.replace(/^0x/, "").toLowerCase();
+  if (clean.length % 2 !== 0 || !/^[0-9a-f]*$/.test(clean)) throw Error("invalid hex");
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
+
+export function githubHeaders(githubPat) {
+  const headers = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "x502-fact-receiver",
+  };
+  if (githubPat) headers.Authorization = `Bearer ${githubPat}`;
+  return headers;
+}
+
 export function parseRepoSlug(repoSlug) {
   const parts = repoSlug.split("/");
   if (parts.length !== 2 || !parts[0] || !parts[1]) throw Error("bad repoSlug");
