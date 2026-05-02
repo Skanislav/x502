@@ -21,10 +21,7 @@ export class ViemVaultWriter implements IVaultWriter {
     factHash: Hex;
     attestationUIDs: Hex[];
   }): Promise<Hex> {
-    // simulate first so revert reasons surface cleanly. The ABI cast is
-    // necessary because the checked-in `bountyVaultAbi` lags the contract
-    // until `forge build && extract-abis` runs in CI (the on-chain shape
-    // is bytes32[] attestationUIDs).
+    // simulate first so revert reasons surface cleanly.
     const { request } = await this.publicClient.simulateContract({
       address: this.vault,
       abi: bountyVaultAbi,
@@ -37,7 +34,7 @@ export class ViemVaultWriter implements IVaultWriter {
         args.deadline,
         args.factHash,
         args.attestationUIDs,
-      ] as never,
+      ],
       account: this.account,
     });
     const txHash = await this.wallet.writeContract(request);

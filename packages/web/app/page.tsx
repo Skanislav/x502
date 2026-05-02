@@ -14,8 +14,19 @@ const DEFAULT_COORDINATOR = process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "http://l
 
 interface DemoConfig {
   coordinator: { endpoint: string };
-  verifiers: Array<{ agentId: string }>;
+  verifiers: Array<{ agentId: string; address: string }>;
   repo: { slug: string };
+  chainId?: number;
+  contracts?: { eas?: string };
+}
+
+/// Attest.org explorer base URL per chain. Returns undefined when we don't
+/// recognize the chain (the verifier theater then renders the UID as
+/// plain text instead of a link).
+function easExplorer(chainId: number | undefined): string | undefined {
+  if (chainId === 8453) return "https://base.easscan.org/attestation/view";
+  if (chainId === 84532) return "https://base-sepolia.easscan.org/attestation/view";
+  return undefined;
 }
 
 const KIND_META: Record<KindName, { label: string; price: bigint; description: string }> = {
@@ -312,7 +323,17 @@ export default function Page() {
             <VerifierTheater
               coordinatorUrl={coordinatorUrl}
               claimId={pipeline.claimId}
-              agentIds={demoCfg?.verifiers.map((v) => v.agentId) ?? ["101", "102", "103"]}
+              agents={
+                demoCfg?.verifiers.map((v) => ({
+                  agentId: v.agentId,
+                  address: v.address,
+                })) ?? [
+                  { agentId: "101", address: "0x0000000000000000000000000000000000000101" },
+                  { agentId: "102", address: "0x0000000000000000000000000000000000000102" },
+                  { agentId: "103", address: "0x0000000000000000000000000000000000000103" },
+                ]
+              }
+              easExplorerBase={easExplorer(demoCfg?.chainId)}
             />
             <SepoliaReplay />
           </div>

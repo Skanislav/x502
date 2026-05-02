@@ -1,3 +1,4 @@
+import type { EventSubscriber } from "@x502/shared";
 import { mockEASAbi } from "@x502/shared/abis";
 import { type Address, type Hex, type PublicClient, decodeAbiParameters } from "viem";
 
@@ -24,6 +25,9 @@ export class EasAttestationWatcher {
     /// Returns undefined when we don't recognize the claim (stale,
     /// different coordinator, etc.) — those events are silently dropped.
     private readonly claimResolver: (claimId: Hex) => ClaimState | undefined,
+    /// Optional event bus — published `attestation.observed` events drive
+    /// the web verifier theater so the UI surfaces UIDs as they land.
+    private readonly events?: EventSubscriber,
     private readonly logger?: { warn: (msg: string) => void },
   ) {}
 
@@ -87,11 +91,20 @@ export class EasAttestationWatcher {
     const state = this.claimResolver(claimId);
     if (!state || !state.factHash) return;
 
-    this.inbox.push({
+    const result = this.inbox.push({
       claimId,
       factHash: state.factHash,
       uid,
       attester: att.attester,
     });
+    if (result.accepted) {
+      this.events?.publish({
+        type: "attestation.observed",
+        claimId,
+        uid,
+        attester: att.attester,
+        ts: Date.now(),
+      });
+    }
   }
 }

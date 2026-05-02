@@ -143,6 +143,7 @@ async function main() {
     schemaUID,
     coord.inbox,
     (claimId) => coord.claims.get(claimId),
+    coord.events,
     { warn: (msg: string) => console.warn(`[eas-watcher] ${msg}`) },
   );
   watcher.start();
