@@ -15,13 +15,13 @@ Each defect has a configured price on the `BountyVault` contract:
 
 | Kind         | Default demo price |
 |--------------|-------------------:|
-| `report`     | 5 USDC             |
-| `triage`     | 2 USDC             |
-| `fix`        | 50 USDC            |
-| `docs_tests` | 30 USDC            |
+| `report`     | 0.05 USDC          |
+| `triage`     | 0.02 USDC          |
+| `fix`        | 0.50 USDC          |
+| `docs_tests` | 0.30 USDC          |
 
 Verifier outcome fee (per attesting agent, deducted from the bounty) is
-**0.10 USDC**.
+**0.001 USDC**.
 
 ## Run it locally
 
@@ -123,8 +123,8 @@ curl -X POST https://coordinator.x502.localhost/claim \
 ```
 
 Coordinator returns `{ claimId, pollUrl }`. Alice polls until 200 → tx hash.
-Onchain: Alice receives `5 - 0.20 = 4.80 USDC`; each of the 2 signing
-verifiers receives `0.10 USDC`.
+Onchain: Alice receives `0.05 - 0.002 = 0.048 USDC`; each of the 2 signing
+verifiers receives `0.001 USDC`.
 
 ### 2. `triage` — accept + label the issue
 
@@ -144,14 +144,14 @@ PR body must contain `Fixes #<issue_number>` (so the DON's `source.js` link
 check passes) and a commitment line matching Carol's wallet.
 
 After the PR is merged on the default branch, Carol files a `kind=fix` claim
-referencing the PR number. She receives `50 - 0.20 = 49.80 USDC`.
+referencing the PR number. She receives `0.50 - 0.002 = 0.498 USDC`.
 
 ### 4. `docs_tests` — same PR, second bounty
 
 Carol's PR also touches `demo/test/` and `demo/docs/`, so once it's merged
 she can ALSO file `kind=docs_tests` against the same PR number. The DON
 checks that merged files include test/ or docs/ paths; verifier agents
-check substance. Carol receives `30 - 0.20 = 29.80 USDC`.
+check substance. Carol receives `0.30 - 0.002 = 0.298 USDC`.
 
 (`claimId = keccak256(repoId, externalId, kind)` — different kinds
 produce different `claimId`s for the same external PR, so the vault's

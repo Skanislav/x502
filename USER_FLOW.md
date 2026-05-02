@@ -72,7 +72,7 @@ This stores a `RepoConfig` ([`contracts/src/BountyVault.sol:38-46`](contracts/sr
 > **Insight**
 > - **One vault, many repos.** A single deployed `BountyVault` serves *all* repos — config is keyed by `bytes32 repoId`. Anyone can call `configureRepo` for a fresh `repoId` and become its owner. This is a classic first-write-wins ownership pattern that lets the protocol be permissionless to onboard onto.
 > - **Why M-of-N (2-of-3 here)?** A single AI verifier could be jailbroken, prompt-injected through the GitHub issue body, or have its key compromised. Requiring multiple independent verifiers to sign means an attacker has to compromise (or convince) `threshold` of them simultaneously.
-> - The `outcomeFeePerVerifier` is the **economic incentive for verifiers to be online**. Each call to `payout` pays each signing verifier's wallet `0.10 USDC` from the bounty. This funds their RPC + Anthropic API costs and gives them skin in the game.
+> - The `outcomeFeePerVerifier` is the **economic incentive for verifiers to be online**. Each call to `payout` pays each signing verifier's wallet `0.001 USDC` from the bounty. This funds their RPC + Anthropic API costs and gives them skin in the game.
 
 ### Step 0.3 — Boot the off-chain services
 
@@ -93,7 +93,7 @@ For the smart-wallet path, the registered "agent address" is the *contract addre
 
 ---
 
-## Phase 1 — Alice files the bug (`kind=report`, 5 USDC)
+## Phase 1 — Alice files the bug (`kind=report`, 0.05 USDC)
 
 ### Step 1.1 — Alice writes the issue body
 
@@ -316,16 +316,16 @@ Inside [`BountyVault.sol:143-197`](contracts/src/BountyVault.sol):
 8.  keccak256(blob) == factHash                                   (FactHashMismatch)
 9.  digest = hashTypedData(Attestation{claimId, recipient, deadline, factHash})
 10. for each signer: trusted? not duplicate? sig valid via SignatureChecker?
-11. price = 5e6;  fees = 0.10e6 * 2 = 0.20e6;  claimantAmount = 4.80e6
+11. price = 0.05e6;  fees = 0.001e6 * 2 = 0.002e6;  claimantAmount = 0.048e6
 12. cfg.balance >= price                                          (InsufficientRepoBalance)
 13. EFFECTS:
        isPaid[claimId] = true
-       cfg.balance -= 5e6
+       cfg.balance -= 0.05e6
 14. INTERACTIONS (after state writes — CEI pattern, nonReentrant):
-       USDC.safeTransfer(getAgentWallet(101), 0.10e6)
-       USDC.safeTransfer(getAgentWallet(102), 0.10e6)
-       USDC.safeTransfer(0xAlice, 4.80e6)
-15. emit Paid(claimId, repoId, kind, recipient, 4.80e6, [101,102])
+       USDC.safeTransfer(getAgentWallet(101), 0.001e6)
+       USDC.safeTransfer(getAgentWallet(102), 0.001e6)
+       USDC.safeTransfer(0xAlice, 0.048e6)
+15. emit Paid(claimId, repoId, kind, recipient, 0.048e6, [101,102])
 ```
 
 > **Insight**
@@ -341,11 +341,11 @@ HTTP 200
 { "status": "paid", "txHash": "0x...", "claimId": "0x...", "recipient": "0xAlice" }
 ```
 
-Her wallet shows **+4.80 USDC**. Done.
+Her wallet shows **+0.048 USDC**. Done.
 
 ---
 
-## Phase 2 — Bob triages (`kind=triage`, 2 USDC)
+## Phase 2 — Bob triages (`kind=triage`, 0.02 USDC)
 
 This is structurally the same as Phase 1 but the *fact rules differ*. Bob:
 
@@ -372,7 +372,7 @@ Different verification logic kicks in:
 | `ClaudePolicy` system prompt | "at least 2 *meaningful* labels added, with clear repro steps or dedup links" — Claude judges *substance*, not just count. This is the only acceptance gate that actually executes today. |
 | Vault | Same `payout` flow, just with `kind = Kind.Triage` ⇒ different `claimId` ⇒ different `isPaid` slot ⇒ **separate from Alice's `report` claim**. Both can be paid against the same issue. |
 
-Bob receives `2 - 0.20 = 1.80 USDC`.
+Bob receives `0.02 - 0.002 = 0.018 USDC`.
 
 > **Insight**
 > - **Bob's wallet ≠ Alice's wallet.** Each gets their own commitment. The vault doesn't know they're collaborating on the same issue — it just sees two distinct `claimId`s.
@@ -381,7 +381,7 @@ Bob receives `2 - 0.20 = 1.80 USDC`.
 
 ---
 
-## Phase 3 — Carol fixes it (`kind=fix`, 50 USDC + `kind=docs_tests`, 30 USDC)
+## Phase 3 — Carol fixes it (`kind=fix`, 0.50 USDC + `kind=docs_tests`, 0.30 USDC)
 
 This is what we just merged in PR #3. Carol:
 
@@ -428,7 +428,7 @@ POST /claim
 The pipeline runs:
 - DON: fetches `/repos/skanislav/x502/pulls/3`, sees `merged=true` AND body matches `/(?:fixes|closes|resolves)\s+#\d+/i` → `status=1`, plus `mergedBlock = first 8 bytes of merge_commit_sha`.
 - Verifiers (×2 of 3): commitment matches → Claude gets the PR title, state, labels, body → judges "real fix, not churn" → returns `accept=true`, signs EIP-712.
-- Vault: pays Carol `50 - 0.20 = 49.80 USDC`.
+- Vault: pays Carol `0.50 - 0.002 = 0.498 USDC`.
 
 ### Step 3.6 — Carol files claim #2 (`kind=docs_tests`) for the same PR
 
@@ -441,9 +441,9 @@ This time:
 - `claimId = keccak256(repoId, 3, kind=3)` — a *different* hash than the `fix` claim, so `isPaid[claimId]` is fresh.
 - DON fetches `/repos/.../pulls/3/files`, scans filenames for `(test|tests|spec|__tests__)/` and `(docs|readme)`. Both hit → `status=1`, `labelMask = 0x3` (bits 1 and 2 set).
 - Verifiers re-judge for *substance* on this kind: tests must be meaningful, docs must not be churn. Carol's PR has both → accepted.
-- Vault: pays Carol `30 - 0.20 = 29.80 USDC`.
+- Vault: pays Carol `0.30 - 0.002 = 0.298 USDC`.
 
-**Carol's total earnings from one PR: 49.80 + 29.80 = 79.60 USDC.**
+**Carol's total earnings from one PR: 0.498 + 0.298 = 0.796 USDC.**
 
 > **Insight**
 > - **Same PR, two bounties, two onchain txs.** The protocol natively supports this because `claimId` is `kind`-aware. There's no "split a PR's bounty into types" complexity — it's just two independent claims.
