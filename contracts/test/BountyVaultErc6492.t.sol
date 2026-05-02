@@ -7,15 +7,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {BountyVault} from "../src/BountyVault.sol";
 import {Attestations} from "../src/lib/Attestations.sol";
 import {ERC6492SignatureChecker} from "../src/lib/ERC6492SignatureChecker.sol";
-import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 import {MockAgentRegistry} from "../src/mocks/MockAgentRegistry.sol";
 import {MockGitHubFactProvider} from "../src/mocks/MockGitHubFactProvider.sol";
+import {MockSmartWalletFactory} from "../src/mocks/MockSmartWalletFactory.sol";
+import {MockUSDC} from "../src/mocks/MockUSDC.sol";
 
-import {
-    MockSmartWallet,
-    MockSmartWalletFactory,
-    NoOpSmartWalletFactory
-} from "./helpers/SmartWalletMocks.sol";
+import {NoOpSmartWalletFactory} from "./helpers/SmartWalletMocks.sol";
 
 /// @notice Exercises the BountyVault signature check across the three signer
 ///         shapes the protocol now accepts:

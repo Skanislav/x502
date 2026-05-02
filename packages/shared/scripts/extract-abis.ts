@@ -19,6 +19,11 @@ const sources = {
   mockAgentRegistry: "MockAgentRegistry.sol/MockAgentRegistry.json",
   mockGitHubFactProvider: "MockGitHubFactProvider.sol/MockGitHubFactProvider.json",
   mockFunctionsRouter: "MockFunctionsRouter.sol/MockFunctionsRouter.json",
+  // Smart-wallet mocks for the demo's ERC-6492 end-to-end story. The factory
+  // is deployed by `demo/scripts/seed.ts` when DEMO_SMART_WALLET=1 so the
+  // verifier-agent can produce 6492-wrapped signatures.
+  mockSmartWallet: "MockSmartWallet.sol/MockSmartWallet.json",
+  mockSmartWalletFactory: "MockSmartWalletFactory.sol/MockSmartWalletFactory.json",
 } as const;
 
 const lines: string[] = [

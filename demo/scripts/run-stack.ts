@@ -154,11 +154,13 @@ async function main() {
 
   // 4) 3 verifier-agents
   for (const v of rt.verifiers) {
-    process.stdout.write(`[run-stack] starting verifier ${v.agentId} on :${v.port}\n`);
+    process.stdout.write(
+      `[run-stack] starting verifier ${v.agentId} on :${v.port}${v.smartWallet ? " (smart-wallet)" : ""}\n`,
+    );
     // Each verifier gets its own scope name so 1claw local mode reads the
     // right key. The scope name is also the env-var name we set below.
     const scopeId = `VERIFIER_${v.agentId}_PRIVATE_KEY`;
-    const child = spawnNode(`verifier-${v.agentId}`, "packages/verifier-agent/src/main.ts", {
+    const env: Record<string, string> = {
       VERIFIER_AGENT_ID: v.agentId,
       VERIFIER_VAULT_ADDRESS: rt.contracts.vault,
       VERIFIER_CHAIN_ID: String(rt.chainId),
@@ -169,7 +171,15 @@ async function main() {
       ONECLAW_SCOPE_ID: scopeId,
       [scopeId]: v.privateKey,
       RPC_URL: rt.rpcUrl,
-    });
+    };
+    if (v.smartWallet) {
+      // Verifier-agent reads these and wraps each EIP-712 sig with the
+      // ERC-6492 magic so the vault deploys the wallet before verifying.
+      env.VERIFIER_SMART_WALLET_ADDRESS = v.smartWallet.address;
+      env.VERIFIER_SMART_WALLET_FACTORY = v.smartWallet.factory;
+      env.VERIFIER_SMART_WALLET_FACTORY_CALLDATA = v.smartWallet.factoryCalldata;
+    }
+    const child = spawnNode(`verifier-${v.agentId}`, "packages/verifier-agent/src/main.ts", env);
     procs.push({ name: `verifier-${v.agentId}`, child });
   }
 

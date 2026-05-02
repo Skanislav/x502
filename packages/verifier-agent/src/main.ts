@@ -28,6 +28,7 @@ import { base, baseSepolia, foundry } from "viem/chains";
 import { AcceptAllPolicy, type DecisionPolicy } from "./decide.js";
 import { ClaudePolicy } from "./policies/claude.js";
 import { buildVerifierApp } from "./server.js";
+import type { SmartWalletWrap } from "./sign.js";
 import { OneClawWalletProvider } from "./wallet/index.js";
 
 function chainFromId(id: number) {
@@ -87,6 +88,11 @@ async function main() {
 
   const policy = await buildPolicy(env, oneClaw, chainId);
 
+  // Optional smart-wallet wrap. When set, sigs are ERC-6492 wrapped so the
+  // vault accepts them even before the wallet contract has been deployed.
+  // The three env vars must be set together (or all absent for plain EOA).
+  const smartWallet = parseSmartWallet(env);
+
   const app = buildVerifierApp({
     signer: {
       agentId: wallet.agentId,
@@ -94,6 +100,7 @@ async function main() {
       chainId,
       account: wallet.account,
       wallet: wallet.walletClient,
+      smartWallet,
     },
     policy,
     repoSlugResolver: (_id) => repoSlug || undefined,
@@ -101,11 +108,33 @@ async function main() {
 
   // eslint-disable-next-line no-console
   console.log(
-    `[x502 verifier] agentId=${wallet.agentId} address=${wallet.address} ` +
+    `[x502 verifier] agentId=${wallet.agentId} ` +
+      `address=${smartWallet?.address ?? wallet.address}${smartWallet ? ` (smart, owner=${wallet.address})` : ""} ` +
       `via=${wallet.source} chainId=${chainId} vault=${vault} port=${port} ` +
       `policy=${policy.constructor.name}`,
   );
   serve({ fetch: app.fetch, port });
+}
+
+function parseSmartWallet(env: NodeJS.ProcessEnv): SmartWalletWrap | undefined {
+  const addr = env.VERIFIER_SMART_WALLET_ADDRESS;
+  const factory = env.VERIFIER_SMART_WALLET_FACTORY;
+  const calldata = env.VERIFIER_SMART_WALLET_FACTORY_CALLDATA;
+  if (!addr && !factory && !calldata) return undefined;
+  if (!addr || !isAddress(addr)) {
+    throw new Error("VERIFIER_SMART_WALLET_ADDRESS must be a 0x-address");
+  }
+  if (!factory || !isAddress(factory)) {
+    throw new Error("VERIFIER_SMART_WALLET_FACTORY must be a 0x-address");
+  }
+  if (!calldata || !calldata.startsWith("0x")) {
+    throw new Error("VERIFIER_SMART_WALLET_FACTORY_CALLDATA must be 0x-hex");
+  }
+  return {
+    address: addr as Address,
+    factory: factory as Address,
+    factoryCalldata: calldata as `0x${string}`,
+  };
 }
 
 main().catch((e) => {

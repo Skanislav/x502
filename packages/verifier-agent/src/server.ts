@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { type Address, type Hex, isAddress, isHex } from "viem";
 
 import type { DecisionPolicy } from "./decide.js";
-import { type SignerConfig, signAttestation } from "./sign.js";
+import { type SignerConfig, signAttestation, signerAddress } from "./sign.js";
 
 export interface VerifierServerOptions {
   signer: SignerConfig;
@@ -56,7 +56,12 @@ export function buildVerifierApp(opts: VerifierServerOptions) {
     c.json({
       ok: true,
       agentId: opts.signer.agentId.toString(),
-      address: opts.signer.account.address,
+      // Effective on-chain identity. For smart-wallet verifiers this is the
+      // wallet contract address (what the IdentityRegistry stores), not the
+      // EOA owner that produced the inner sig.
+      address: signerAddress(opts.signer),
+      ownerAddress: opts.signer.account.address,
+      smartWallet: opts.signer.smartWallet?.address,
       vault: opts.signer.vault,
       chainId: opts.signer.chainId,
     }),
