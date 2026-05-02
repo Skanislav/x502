@@ -84,7 +84,10 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
   state.updatedAt = Date.now();
 
   // 3) Submit payout (permissionless on-chain — coordinator does it as a
-  //    convenience but anyone with the UIDs could).
+  //    convenience but anyone with the UIDs could). The writer fires
+  //    `onSubmitted` once the tx hash is known and resolves only after a
+  //    successful receipt, so `payout.confirmed` only emits when the tx
+  //    actually mined with status=success.
   try {
     const tx = await deps.vault.submitPayout({
       repoId,
@@ -94,11 +97,14 @@ export async function runClaimPipeline(state: ClaimState, deps: PipelineDeps): P
       deadline,
       factHash: state.factHash!,
       attestationUIDs,
+      onSubmitted: (txHash) => {
+        state.txHash = txHash;
+        deps.events?.publish({ type: "payout.submitted", claimId, txHash, ts: Date.now() });
+      },
     });
     state.txHash = tx;
     state.status = "paid";
     state.updatedAt = Date.now();
-    deps.events?.publish({ type: "payout.submitted", claimId, txHash: tx, ts: Date.now() });
     deps.events?.publish({ type: "payout.confirmed", claimId, txHash: tx, ts: Date.now() });
   } catch (e) {
     state.status = "failed";
