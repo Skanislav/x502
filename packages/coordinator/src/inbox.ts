@@ -1,30 +1,33 @@
-import type { SignedAttestation } from "@x502/shared";
-import type { Hex } from "viem";
+import type { Address, Hex } from "viem";
 
-/// Per-claim inbox where verifier-side skill helpers POST signed
-/// attestations. The pipeline `await`s on each claimId; the HTTP handler
-/// pushes attestations as they arrive. When the threshold is reached the
-/// awaiting promise resolves with a deterministically-sorted slice of
-/// `threshold` sigs (lowest agentIds first), and the inbox forgets the
-/// claim. On timeout it forgets the claim and rejects.
+/// Per-claim inbox where the EAS event watcher records attestation UIDs as
+/// they land on chain. The pipeline `await`s on each claimId; the watcher
+/// pushes one entry per `Attested(schema=schemaUID)` event after decoding
+/// + filtering. When threshold matching attestations have been observed,
+/// the awaiting promise resolves with the UID array (deterministically
+/// sorted by attester address) and the inbox forgets the claim.
 ///
-/// Each agentId can submit at most once per claim; duplicate pushes are
-/// rejected by `push()`. The inbox does NOT validate signatures — the vault
-/// re-checks via `ERC6492SignatureChecker.isValidSig` at payout time, so
-/// invalid sigs only waste their submitter's gas (they cause the eventual
-/// `vault.payout` call to revert, surfaced as a `failed` claim).
+/// Each attester contributes at most one attestation per claim; duplicates
+/// are silently ignored (the vault would also reject them, but rejecting
+/// here keeps the pipeline tidy).
+///
+/// The inbox does NOT verify attestation content — that's the EAS watcher's
+/// job (it decodes + filters by schema/claimId/factHash before pushing).
+/// Trust + dedup checks at this layer are belt-and-suspenders.
 export interface InboxAwaitArgs {
   claimId: Hex;
   factHash: Hex;
   threshold: number;
-  trustedAgentIds: Set<string>;
+  /// Lower-cased address strings; the inbox checks attester membership here
+  /// to bail early on stray pushes for repos this verifier doesn't serve.
+  trustedAttesters: Set<string>;
   timeoutMs: number;
 }
 
 export interface PushResult {
   accepted: boolean;
   reason?: string;
-  /// Total accepted sigs after this push; only set on success.
+  /// Total accepted UIDs after this push; only set on success.
   total?: number;
   threshold?: number;
 }
@@ -32,10 +35,11 @@ export interface PushResult {
 interface Waiter {
   threshold: number;
   factHash: Hex;
-  trustedAgentIds: Set<string>;
-  sigs: SignedAttestation[];
-  seenAgentIds: Set<string>;
-  resolve: (sigs: SignedAttestation[]) => void;
+  trustedAttesters: Set<string>;
+  uids: Hex[];
+  attesters: Address[];
+  seen: Set<string>;
+  resolve: (uids: Hex[]) => void;
   reject: (e: Error) => void;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -43,18 +47,16 @@ interface Waiter {
 export class AttestationInbox {
   private readonly waiters = new Map<Hex, Waiter>();
 
-  /// Snapshot of current sig counts for /payout polling.
+  /// Snapshot for /payout polling.
   countOf(claimId: Hex): number {
-    return this.waiters.get(claimId)?.sigs.length ?? 0;
+    return this.waiters.get(claimId)?.uids.length ?? 0;
   }
 
-  /// Whether the inbox is still expecting sigs for this claim. Used to
-  /// reject pushes for claims whose pipeline has already moved on.
   isOpen(claimId: Hex): boolean {
     return this.waiters.has(claimId);
   }
 
-  await(args: InboxAwaitArgs): Promise<SignedAttestation[]> {
+  await(args: InboxAwaitArgs): Promise<Hex[]> {
     return new Promise((resolve, reject) => {
       if (this.waiters.has(args.claimId)) {
         reject(new Error(`inbox already awaiting ${args.claimId}`));
@@ -64,15 +66,18 @@ export class AttestationInbox {
         const w = this.waiters.get(args.claimId);
         this.waiters.delete(args.claimId);
         reject(
-          new Error(`attestation timeout: only got ${w?.sigs.length ?? 0}/${args.threshold} sigs`),
+          new Error(
+            `attestation timeout: only got ${w?.uids.length ?? 0}/${args.threshold} attestations`,
+          ),
         );
       }, args.timeoutMs);
       this.waiters.set(args.claimId, {
         threshold: args.threshold,
         factHash: args.factHash,
-        trustedAgentIds: args.trustedAgentIds,
-        sigs: [],
-        seenAgentIds: new Set(),
+        trustedAttesters: args.trustedAttesters,
+        uids: [],
+        attesters: [],
+        seen: new Set(),
         resolve,
         reject,
         timer,
@@ -80,41 +85,44 @@ export class AttestationInbox {
     });
   }
 
-  /// Push one attestation. Returns the accept/reject reason. Triggers the
-  /// awaiting promise once threshold is reached.
-  push(claimId: Hex, attestation: SignedAttestation): PushResult {
-    const w = this.waiters.get(claimId);
+  /// Push one observed attestation. Returns accept/reject. Resolves the
+  /// waiter once threshold UIDs have been collected (sorted deterministically).
+  push(args: {
+    claimId: Hex;
+    factHash: Hex;
+    uid: Hex;
+    attester: Address;
+  }): PushResult {
+    const w = this.waiters.get(args.claimId);
     if (!w) return { accepted: false, reason: "no active claim awaiting attestations" };
-
-    if (attestation.attestation.factHash.toLowerCase() !== w.factHash.toLowerCase()) {
-      return { accepted: false, reason: "attestation.factHash does not match claim factHash" };
+    if (args.factHash.toLowerCase() !== w.factHash.toLowerCase()) {
+      return { accepted: false, reason: "factHash mismatch" };
     }
-    const id = attestation.agentId.toString();
-    if (!w.trustedAgentIds.has(id)) {
-      return { accepted: false, reason: `agentId ${id} is not in repo's trusted set` };
+    const key = args.attester.toLowerCase();
+    if (!w.trustedAttesters.has(key)) {
+      return { accepted: false, reason: `attester ${args.attester} not trusted by this repo` };
     }
-    if (w.seenAgentIds.has(id)) {
-      return { accepted: false, reason: `attestation already received for agentId ${id}` };
+    if (w.seen.has(key)) {
+      return { accepted: false, reason: `attester ${args.attester} already seen` };
     }
 
-    w.seenAgentIds.add(id);
-    w.sigs.push(attestation);
+    w.seen.add(key);
+    w.uids.push(args.uid);
+    w.attesters.push(args.attester);
 
-    if (w.sigs.length >= w.threshold) {
+    if (w.uids.length >= w.threshold) {
       clearTimeout(w.timer);
-      this.waiters.delete(claimId);
-      // Deterministic order so the on-chain payout is byte-identical regardless
-      // of arrival order — useful for replay/debugging.
-      const final = [...w.sigs]
-        .sort((a, b) => (a.agentId < b.agentId ? -1 : 1))
-        .slice(0, w.threshold);
-      w.resolve(final);
+      this.waiters.delete(args.claimId);
+      // Pair (uid, attester) and sort by attester address for a deterministic
+      // payout payload across runs.
+      const pairs = w.uids.map((uid, i) => ({ uid, attester: w.attesters[i]! }));
+      pairs.sort((a, b) => (a.attester.toLowerCase() < b.attester.toLowerCase() ? -1 : 1));
+      w.resolve(pairs.slice(0, w.threshold).map((p) => p.uid));
     }
 
-    return { accepted: true, total: w.sigs.length, threshold: w.threshold };
+    return { accepted: true, total: w.uids.length, threshold: w.threshold };
   }
 
-  /// For tests: drop the waiter without resolving (pipeline aborted).
   abandon(claimId: Hex): void {
     const w = this.waiters.get(claimId);
     if (!w) return;

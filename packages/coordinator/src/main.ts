@@ -2,11 +2,12 @@
 ///
 ///   pnpm --filter @x502/coordinator start
 ///
-/// In the new architecture the coordinator is a passive aggregator: it
-/// listens for /claim, requests the fact from Chainlink Functions, opens an
-/// inbox per claim, and waits for verifier-side skill helpers to push
-/// signed attestations via POST /attestation. Once threshold sigs land the
-/// vault.payout submits.
+/// In the EAS-driven architecture the coordinator is a passive aggregator:
+/// listens for /claim, requests the fact from Chainlink Functions, opens
+/// an inbox per claim, watches the on-chain EAS contract for matching
+/// attestations under our schema, and submits vault.payout once threshold
+/// attestations land. (Vault.payout is permissionless — anyone with the
+/// UIDs can call it; the coordinator does so as a convenience.)
 ///
 /// Required env (see .env.example):
 ///   COORDINATOR_PORT                default 8787
@@ -14,16 +15,22 @@
 ///   COORDINATOR_CHAIN_ID            31337 = anvil, 84532 = Base Sepolia
 ///   VAULT_ADDRESS
 ///   FACT_PROVIDER_ADDRESS           MockGitHubFactProvider OR GitHubFactReceiver
+///   EAS_ADDRESS                     0x4200…0021 on Base / Base Sepolia, or
+///                                   the MockEAS deployed by demo seed
+///   X502_SCHEMA_UID                 keccak schemaUID (registered once via
+///                                   EAS's SchemaRegistry in production)
 ///   COORDINATOR_REPO                owner/repo
 ///   COORDINATOR_THRESHOLD           M-of-N
 ///   COORDINATOR_TRUSTED_AGENT_IDS   comma-separated bigints
+///   COORDINATOR_TRUSTED_ATTESTERS   comma-separated 0x-addresses, same
+///                                   length+order as agent ids
 ///   COORDINATOR_FACT_TIMEOUT_MS     default 120000
-///   COORDINATOR_ATTESTATION_TIMEOUT_MS default 300000 (5min — humans drive verifiers)
+///   COORDINATOR_ATTESTATION_TIMEOUT_MS default 300000 (5min)
 ///
-/// Wallet (the coordinator's wallet still submits the on-chain payout tx):
+/// Wallet (the coordinator submits the on-chain payout tx):
 ///   ONECLAW_MODE                    local (default) | remote
-///   COORDINATOR_ONECLAW_SCOPE_ID    1claw scope for the submitter wallet
-///                                   (default `COORDINATOR_PRIVATE_KEY`)
+///   COORDINATOR_ONECLAW_SCOPE_ID    1claw scope (default
+///                                   COORDINATOR_PRIVATE_KEY)
 
 import { serve } from "@hono/node-server";
 import { oneClawAccount, pickOneClawFromEnv } from "@x502/shared";
@@ -31,13 +38,16 @@ import {
   http,
   type Account,
   type Address,
+  type Hex,
   createPublicClient,
   createWalletClient,
   isAddress,
+  isHex,
 } from "viem";
 import { base, baseSepolia, foundry } from "viem/chains";
 
 import {
+  EasAttestationWatcher,
   StaticRepoRegistry,
   ViemFactProvider,
   ViemVaultWriter,
@@ -66,8 +76,15 @@ async function main() {
 
   const vault = required(env, "VAULT_ADDRESS");
   const factProviderAddr = required(env, "FACT_PROVIDER_ADDRESS");
+  const easAddress = required(env, "EAS_ADDRESS");
+  const schemaUIDRaw = required(env, "X502_SCHEMA_UID");
   if (!isAddress(vault)) throw new Error("VAULT_ADDRESS must be a 0x-address");
   if (!isAddress(factProviderAddr)) throw new Error("FACT_PROVIDER_ADDRESS must be a 0x-address");
+  if (!isAddress(easAddress)) throw new Error("EAS_ADDRESS must be a 0x-address");
+  if (!isHex(schemaUIDRaw) || schemaUIDRaw.length !== 66) {
+    throw new Error("X502_SCHEMA_UID must be 0x-prefixed bytes32");
+  }
+  const schemaUID = schemaUIDRaw as Hex;
 
   const oneClaw = pickOneClawFromEnv(env);
   const scopeId = env.COORDINATOR_ONECLAW_SCOPE_ID ?? "COORDINATOR_PRIVATE_KEY";
@@ -82,9 +99,20 @@ async function main() {
   const trustedAgentIds = required(env, "COORDINATOR_TRUSTED_AGENT_IDS")
     .split(",")
     .map((s) => BigInt(s.trim()));
+  const trustedAttesters = required(env, "COORDINATOR_TRUSTED_ATTESTERS")
+    .split(",")
+    .map((s) => s.trim()) as Address[];
+  for (const a of trustedAttesters) {
+    if (!isAddress(a)) throw new Error(`COORDINATOR_TRUSTED_ATTESTERS contains non-address: ${a}`);
+  }
+  if (trustedAgentIds.length !== trustedAttesters.length) {
+    throw new Error(
+      "COORDINATOR_TRUSTED_AGENT_IDS and COORDINATOR_TRUSTED_ATTESTERS must agree in length",
+    );
+  }
 
   const repoRegistry = new StaticRepoRegistry();
-  repoRegistry.add(repoSlug, threshold, trustedAgentIds);
+  repoRegistry.add(repoSlug, threshold, trustedAgentIds, trustedAttesters);
 
   const factProvider = new ViemFactProvider(
     publicClient as never,
@@ -109,11 +137,22 @@ async function main() {
     attestationTimeoutMs: Number(env.COORDINATOR_ATTESTATION_TIMEOUT_MS ?? "300000"),
   });
 
+  const watcher = new EasAttestationWatcher(
+    publicClient as never,
+    easAddress as Address,
+    schemaUID,
+    coord.inbox,
+    (claimId) => coord.claims.get(claimId),
+    { warn: (msg: string) => console.warn(`[eas-watcher] ${msg}`) },
+  );
+  watcher.start();
+
   // eslint-disable-next-line no-console
   console.log(
     `[x502 coordinator] port=${port} chainId=${chainId} vault=${vault} ` +
-      `factProvider=${factProviderAddr} repo=${repoSlug} threshold=${threshold} ` +
-      `trustedAgents=${trustedAgentIds.join(",")} wallet=oneclaw:${scope.kind}@${scope.address}`,
+      `factProvider=${factProviderAddr} eas=${easAddress} schemaUID=${schemaUID} ` +
+      `repo=${repoSlug} threshold=${threshold} trustedAttesters=${trustedAttesters.length} ` +
+      `wallet=oneclaw:${scope.kind}@${scope.address}`,
   );
   serve({ fetch: coord.app.fetch, port });
 }

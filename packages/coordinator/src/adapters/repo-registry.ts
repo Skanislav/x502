@@ -1,4 +1,4 @@
-import type { Hex } from "viem";
+import type { Address, Hex } from "viem";
 
 import { repoIdFromSlug } from "@x502/shared";
 import type { IRepoRegistry } from "../providers.js";
@@ -8,13 +8,28 @@ import type { IRepoRegistry } from "../providers.js";
 export class StaticRepoRegistry implements IRepoRegistry {
   private readonly bySlug = new Map<
     string,
-    { repoId: Hex; threshold: number; trustedAgentIds: bigint[] }
+    {
+      repoId: Hex;
+      threshold: number;
+      trustedAgentIds: bigint[];
+      trustedAttesters: Address[];
+    }
   >();
   private readonly byRepoId = new Map<Hex, string>();
 
-  add(slug: string, threshold: number, trustedAgentIds: bigint[]): Hex {
+  add(
+    slug: string,
+    threshold: number,
+    trustedAgentIds: bigint[],
+    trustedAttesters: Address[],
+  ): Hex {
+    if (trustedAgentIds.length !== trustedAttesters.length) {
+      throw new Error(
+        `StaticRepoRegistry.add: trustedAgentIds (${trustedAgentIds.length}) and trustedAttesters (${trustedAttesters.length}) must be the same length`,
+      );
+    }
     const repoId = repoIdFromSlug(slug);
-    this.bySlug.set(slug, { repoId, threshold, trustedAgentIds });
+    this.bySlug.set(slug, { repoId, threshold, trustedAgentIds, trustedAttesters });
     this.byRepoId.set(repoId, slug);
     return repoId;
   }

@@ -1,7 +1,7 @@
-import { EventBus, Kind, type KindName, type SignedAttestation, deriveClaimId } from "@x502/shared";
+import { EventBus, Kind, type KindName, deriveClaimId } from "@x502/shared";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { type Address, type Hex, isAddress, isHex } from "viem";
+import { type Address, type Hex, isAddress } from "viem";
 
 import { AttestationInbox } from "./inbox.js";
 import { runClaimPipeline } from "./pipeline.js";
@@ -28,8 +28,9 @@ export interface CoordinatorOptions {
   paymentGate?: IPaymentGate;
   /// How long the pipeline will wait for the Chainlink Functions fact.
   factTimeoutMs?: number;
-  /// How long the pipeline will wait for verifier-side skill helpers to
-  /// push signed attestations (humans + Claude, default 5 min).
+  /// How long the pipeline will wait for verifiers to publish EAS
+  /// attestations after the fact has been delivered. Verifiers are humans
+  /// driving `claude` locally, so this is generous (default 5 min).
   attestationTimeoutMs?: number;
   /// EIP-712 attestation deadline window (now + windowSec).
   deadlineWindowSec?: number;
@@ -66,61 +67,14 @@ function parseClaim(b: PostClaimBody): ClaimRequestBody {
   };
 }
 
-interface PostAttestationBody {
-  claimId: unknown;
-  agentId: unknown;
-  signature: unknown;
-  attestation: {
-    claimId?: unknown;
-    recipient?: unknown;
-    deadline?: unknown;
-    factHash?: unknown;
-  };
-}
-
-function parseAttestation(b: PostAttestationBody): {
-  claimId: Hex;
-  signed: SignedAttestation;
-} {
-  if (!isHex(b.claimId) || (b.claimId as string).length !== 66) throw new Error("bad claimId");
-  if (typeof b.agentId !== "string" && typeof b.agentId !== "number")
-    throw new Error("agentId required (string|number)");
-  if (!isHex(b.signature)) throw new Error("signature must be 0x-hex");
-  const inner = b.attestation;
-  if (!inner || typeof inner !== "object") throw new Error("attestation required");
-  if (!isHex(inner.claimId) || (inner.claimId as string).length !== 66)
-    throw new Error("attestation.claimId must be bytes32 hex");
-  if (typeof inner.recipient !== "string" || !isAddress(inner.recipient))
-    throw new Error("attestation.recipient must be 0x-address");
-  if (typeof inner.deadline !== "string" && typeof inner.deadline !== "number")
-    throw new Error("attestation.deadline required");
-  if (!isHex(inner.factHash) || (inner.factHash as string).length !== 66)
-    throw new Error("attestation.factHash must be bytes32 hex");
-  if ((b.claimId as string).toLowerCase() !== (inner.claimId as string).toLowerCase())
-    throw new Error("body.claimId and attestation.claimId disagree");
-
-  return {
-    claimId: b.claimId as Hex,
-    signed: {
-      agentId: BigInt(b.agentId as string | number),
-      signature: b.signature as Hex,
-      attestation: {
-        claimId: inner.claimId as Hex,
-        recipient: inner.recipient as Address,
-        deadline: BigInt(inner.deadline as string | number),
-        factHash: inner.factHash as Hex,
-      },
-    },
-  };
-}
-
 export interface Coordinator {
   app: Hono;
   /// In-memory claim store (exposed for tests / introspection).
   claims: Map<Hex, ClaimState>;
   /// Event bus the demo UI subscribes to via SSE. Tests can subscribe directly.
   events: EventBus;
-  /// Inbox for verifier-side attestation pushes — exposed for tests.
+  /// Per-claim attestation inbox. The EAS event watcher (in main.ts)
+  /// pushes observed attestations here; tests can drive it directly.
   inbox: AttestationInbox;
 }
 
@@ -136,8 +90,6 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
   const inbox = new AttestationInbox();
   const app = new Hono();
 
-  // Mount the x402 (or noop) gate. It registers a global middleware that
-  // matches the routes it's configured to gate (typically /claim).
   paymentGate.apply(app);
 
   app.get("/health", (c) => c.json({ ok: true, knownClaims: claims.size }));
@@ -171,7 +123,7 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
       request: parsed,
       deadline,
       status: "verifying",
-      attestations: [],
+      attestationUIDs: [],
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -186,13 +138,12 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
       ts: Date.now(),
     });
 
-    // Fire pipeline; do NOT await — return poll URL immediately.
     runClaimPipeline(state, {
       factProvider: opts.factProvider,
       vault: opts.vault,
       inbox,
       threshold: repo.threshold,
-      trustedAgentIds: new Set(repo.trustedAgentIds.map((id) => id.toString())),
+      trustedAttesters: new Set(repo.trustedAttesters.map((a) => a.toLowerCase())),
       factTimeoutMs,
       attestationTimeoutMs,
       events,
@@ -221,7 +172,6 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
     if (state.status === "failed") {
       return c.json({ status: "failed", error: state.error, claimId }, 410);
     }
-    // Pending: 202 + Retry-After
     return c.json(
       {
         status: state.status,
@@ -234,10 +184,10 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
     );
   });
 
-  /// Verifier-side skills call this to discover claims they should sign.
+  /// Verifier-side skills call this to discover claims they should attest.
   /// Returns claims where:
   ///   - state is `verifying` (not yet paid/failed)
-  ///   - the fact has been delivered (so the skill knows what to sign over)
+  ///   - the fact has been delivered (so the skill knows the factHash)
   ///   - this agentId is in the repo's trusted set
   app.get("/pending-claims/:agentId", (c) => {
     const idStr = c.req.param("agentId");
@@ -279,30 +229,6 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
       });
     }
     return c.json({ agentId: idStr, pending });
-  });
-
-  /// Verifier-side skill helper POSTs here once it has signed an
-  /// attestation. The inbox dedups + threshold-counts; when threshold is
-  /// reached the pipeline's await unblocks and the vault.payout fires.
-  app.post("/attestation", async (c) => {
-    let parsed: ReturnType<typeof parseAttestation>;
-    try {
-      parsed = parseAttestation((await c.req.json()) as PostAttestationBody);
-    } catch (e) {
-      return c.json({ error: (e as Error).message }, 400);
-    }
-    const result = inbox.push(parsed.claimId, parsed.signed);
-    if (!result.accepted) {
-      return c.json({ accepted: false, reason: result.reason }, 409);
-    }
-    events.publish({
-      type: "verifier.signed",
-      claimId: parsed.claimId,
-      agentId: parsed.signed.agentId.toString(),
-      signature: parsed.signed.signature,
-      ts: Date.now(),
-    });
-    return c.json({ accepted: true, sigs: result.total, threshold: result.threshold });
   });
 
   app.get("/events", (c) =>
