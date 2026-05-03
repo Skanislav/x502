@@ -191,6 +191,11 @@ contract BountyVault is ReentrancyGuard {
         if ((kind == Kind.Fix || kind == Kind.DocsTests) && fb.mergedBlock == 0) {
             revert FactMergeMissing();
         }
+        // Bind payout recipient to the wallet committed in the GH issue/PR
+        // body (`<!-- x502:0xWALLET -->`). The fact oracle parses this into
+        // `ghAuthorBinding`. Without this check, `payout` is permissionless
+        // and a bystander observing threshold UIDs could submit with their
+        // own recipient and steal the bounty.
         if (recipient == address(0) || recipient != fb.ghAuthorBinding) {
             revert RecipientNotBound(recipient, fb.ghAuthorBinding);
         }
