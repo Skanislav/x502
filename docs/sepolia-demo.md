@@ -127,6 +127,46 @@ Raw fact blob:
 
 The encoded tuple is `(claimId, factHash, accept=true)`.
 
+## Live EAS Event Log
+
+The attestation transaction emitted the real Base Sepolia EAS `Attested`
+event. This is the raw receipt log decoded from transaction
+`0x83168e5e3cc84d5bb819cfa59da64a2a685f3e91857b5f438807b86ac8eccd07`.
+
+| Field | Value |
+|---|---|
+| Block | `41024875` |
+| Timestamp | `2026-05-03 14:20:38 UTC` |
+| Log index | `0x114` |
+| EAS address | `0x4200000000000000000000000000000000000021` |
+| Event signature | `Attested(address,address,bytes32,bytes32)` |
+| Topic 0 | `0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75685141b35` |
+| Indexed recipient | `0x0000000000000000000000000000000000000000` |
+| Indexed attester | `0x980abF154694Fe3Fea424eD095B04C6365E92F9b` |
+| Indexed schema | `0x5dcd6b7851d582fe235f915024912fe525f2fc63cd477511182213c1b065e3c6` |
+| Data / UID | `0xb631d99e432b8def12d9cba441cd87b0e14e34b978f393f76fac8c9e13947b4d` |
+
+Raw log:
+
+```json
+{
+  "address": "0x4200000000000000000000000000000000000021",
+  "topics": [
+    "0x8bf46bf4cfd674fa735a3d63ec1c9ad4153f033c290341f3a588b75685141b35",
+    "0x0000000000000000000000000000000000000000000000000000000000000000",
+    "0x000000000000000000000000980abf154694fe3fea424ed095b04c6365e92f9b",
+    "0x5dcd6b7851d582fe235f915024912fe525f2fc63cd477511182213c1b065e3c6"
+  ],
+  "data": "0xb631d99e432b8def12d9cba441cd87b0e14e34b978f393f76fac8c9e13947b4d",
+  "blockNumber": "0x271fd6b",
+  "blockTimestamp": "0x69f759b6",
+  "transactionHash": "0x83168e5e3cc84d5bb819cfa59da64a2a685f3e91857b5f438807b86ac8eccd07",
+  "transactionIndex": "0xa",
+  "logIndex": "0x114",
+  "removed": false
+}
+```
+
 ## Final On-Chain State
 
 Verified after payout:
@@ -148,11 +188,16 @@ The payout transaction transferred:
 
 ## Demo Caveat
 
-The live coordinator opened the claim and requested the Chainlink fact, but
-its EAS watcher did not observe the live EAS attestation log in time. The
-settlement was completed by calling the vault's permissionless `payout(...)`
-directly with the valid attestation UID after a successful `cast call`
-simulation.
+The original live coordinator opened the claim and requested the Chainlink
+fact, but its EAS watcher did not observe the live EAS attestation log in
+time. The settlement was completed by calling the vault's permissionless
+`payout(...)` directly with the valid attestation UID after a successful
+`cast call` simulation.
+
+The current coordinator now backfills recent EAS `Attested` logs when the
+watcher starts, then keeps the live subscription open. That makes the demo
+more tolerant of restart or RPC polling gaps while preserving the same
+on-chain validation path.
 
 This still proves the live Base Sepolia contract path:
 
@@ -187,6 +232,7 @@ cast call "$VAULT" "balanceOf(bytes32)(uint256)" "$REPO_ID" --rpc-url "$BASE_SEP
 cast call "$FACT" "requestIdOf(bytes32)(bytes32)" "$CLAIM" --rpc-url "$BASE_SEPOLIA_RPC_URL"
 cast call "$FACT" "getFact(bytes32)(bool,bytes)" "$CLAIM" --rpc-url "$BASE_SEPOLIA_RPC_URL"
 cast call "$EAS" "getAttestation(bytes32)((bytes32,bytes32,uint64,uint64,uint64,bytes32,address,address,bool,bytes))" "$UID" --rpc-url "$BASE_SEPOLIA_RPC_URL"
+cast receipt 0x83168e5e3cc84d5bb819cfa59da64a2a685f3e91857b5f438807b86ac8eccd07 --rpc-url "$BASE_SEPOLIA_RPC_URL"
 cast call "$USDC" "balanceOf(address)(uint256)" "$RECIPIENT" --rpc-url "$BASE_SEPOLIA_RPC_URL"
 cast call "$USDC" "balanceOf(address)(uint256)" "$ATTESTER" --rpc-url "$BASE_SEPOLIA_RPC_URL"
 ```

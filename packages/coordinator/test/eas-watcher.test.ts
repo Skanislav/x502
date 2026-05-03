@@ -56,10 +56,13 @@ function makeWatcher(args: {
   state?: ClaimState;
   logger?: { warn: (msg: string) => void };
   events?: { publish: (e: unknown) => void };
+  publicClient?: Partial<PublicClient>;
+  backfillBlocks?: bigint;
 }): EasAttestationWatcher {
   const publicClient = {
     readContract: vi.fn().mockResolvedValue(args.attestation),
     watchContractEvent: vi.fn(),
+    ...args.publicClient,
   } as unknown as PublicClient;
 
   return new EasAttestationWatcher(
@@ -70,7 +73,23 @@ function makeWatcher(args: {
     () => args.state,
     args.events as never,
     args.logger,
+    { backfillBlocks: args.backfillBlocks },
   );
+}
+
+function makeWatcherWithClient(args: {
+  inbox: AttestationInbox;
+  attestation: MockAttestation;
+  state?: ClaimState;
+  logger?: { warn: (msg: string) => void };
+  events?: { publish: (e: unknown) => void };
+  publicClient: Partial<PublicClient>;
+  backfillBlocks?: bigint;
+}): { watcher: EasAttestationWatcher; publicClient: Partial<PublicClient> } {
+  return {
+    watcher: makeWatcher(args),
+    publicClient: args.publicClient,
+  };
 }
 
 async function deliverLog(
@@ -87,6 +106,68 @@ async function deliverLog(
 }
 
 describe("EasAttestationWatcher.handleLog", () => {
+  it("backfills recent Attested logs on start so restart-time attestations still settle", async () => {
+    const inbox = new AttestationInbox();
+    const events = { publish: vi.fn() };
+    const uid = `0x${"cc".repeat(32)}` as Hex;
+    const state = makeState();
+    const publicClient = {
+      readContract: vi.fn().mockResolvedValue({
+        uid,
+        schema: SCHEMA,
+        revocationTime: 0n,
+        attester: ATTESTER,
+        data: encodeAbiParameters(
+          [{ type: "bytes32" }, { type: "bytes32" }, { type: "bool" }],
+          [CLAIM_ID, STATE_FACT_HASH, true],
+        ),
+      }),
+      watchContractEvent: vi.fn(),
+      getBlockNumber: vi.fn().mockResolvedValue(120n),
+      getContractEvents: vi.fn().mockResolvedValue([{ args: { uid, attester: ATTESTER } }]),
+    };
+
+    const waiterPromise = inbox.await({
+      claimId: CLAIM_ID,
+      factHash: STATE_FACT_HASH,
+      threshold: 1,
+      trustedAttesters: new Set([ATTESTER.toLowerCase()]),
+      timeoutMs: 1_000,
+    });
+    const { watcher } = makeWatcherWithClient({
+      inbox,
+      attestation: {
+        uid,
+        schema: SCHEMA,
+        revocationTime: 0n,
+        attester: ATTESTER,
+        data: "0x",
+      },
+      state,
+      events,
+      publicClient: publicClient as never,
+      backfillBlocks: 25n,
+    });
+
+    watcher.start();
+
+    await vi.waitFor(() => {
+      expect(publicClient.getContractEvents).toHaveBeenCalledWith(
+        expect.objectContaining({
+          address: EAS_ADDR,
+          eventName: "Attested",
+          args: { schema: SCHEMA },
+          fromBlock: 95n,
+          toBlock: 120n,
+        }),
+      );
+    });
+    await expect(waiterPromise).resolves.toEqual([uid]);
+    expect(events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "attestation.observed", uid }),
+    );
+  });
+
   it("drops attestations whose decoded factHash does not match state.factHash", async () => {
     const inbox = new AttestationInbox();
     const warn = vi.fn();

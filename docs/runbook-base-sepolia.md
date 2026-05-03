@@ -296,6 +296,11 @@ export COORDINATOR_ONECLAW_SCOPE_ID=COORDINATOR_PRIVATE_KEY
 pnpm exec tsx packages/coordinator/src/main.ts
 ```
 
+On startup, the coordinator watches new EAS `Attested` events and also
+backfills the latest `500` EAS blocks for the configured schema. This lets a
+restarted coordinator recover attestations that landed shortly before the
+subscription was ready.
+
 Health check:
 
 ```sh
@@ -358,6 +363,11 @@ Record:
 
 - EAS attestation UID
 - EAS attestation tx hash
+- The raw EAS `Attested` event log from the receipt:
+
+```sh
+cast receipt <eas-attestation-tx-hash> --rpc-url "$BASE_SEPOLIA_RPC_URL"
+```
 
 ## Wait For Coordinator Payout
 
@@ -454,6 +464,7 @@ For every live run, capture:
 - Payout tx hash
 - Final `isPaid(claimId)` value
 - Final recipient and verifier USDC balances
+- Raw EAS `Attested` event log from the attestation tx receipt
 - Any caveat, especially whether payout was coordinator-driven or
   permissionless fallback
 
@@ -491,6 +502,10 @@ If `getFact` is ready but the coordinator is stale, restart the coordinator
 and resubmit the same claim. The claim ID is deterministic.
 
 ### Attestation exists but coordinator shows `sigs=0`
+
+Current coordinator builds backfill the most recent `500` EAS blocks on
+startup. If the attestation landed recently, restart the coordinator and
+resubmit the deterministic claim before falling back to a manual payout.
 
 Verify the EAS attestation:
 

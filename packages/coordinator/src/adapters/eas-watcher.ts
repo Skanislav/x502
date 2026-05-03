@@ -5,6 +5,17 @@ import { type Address, type Hex, type PublicClient, decodeAbiParameters } from "
 import type { AttestationInbox } from "../inbox.js";
 import type { ClaimState } from "../types.js";
 
+interface EasWatcherOptions {
+  backfillBlocks?: bigint;
+}
+
+interface EasAttestedLog {
+  args: {
+    uid?: Hex;
+    attester?: Address;
+  };
+}
+
 /// Watches the EAS contract for `Attested(...)` events under the vault's
 /// schema and forwards them into the AttestationInbox. The coordinator's
 /// pipeline awaits the inbox; once threshold attestations land for a
@@ -29,6 +40,7 @@ export class EasAttestationWatcher {
     /// the web verifier theater so the UI surfaces UIDs as they land.
     private readonly events?: EventSubscriber,
     private readonly logger?: { warn: (msg: string) => void },
+    private readonly options: EasWatcherOptions = {},
   ) {}
 
   start(): void {
@@ -39,13 +51,10 @@ export class EasAttestationWatcher {
       eventName: "Attested",
       args: { schema: this.schemaUID },
       onLogs: (logs) => {
-        for (const log of logs) {
-          this.handleLog(log).catch((e) => {
-            this.logger?.warn(`eas-watcher handleLog failed: ${(e as Error).message}`);
-          });
-        }
+        this.handleLogs(logs as EasAttestedLog[]);
       },
     });
+    void this.backfillRecentLogs();
   }
 
   stop(): void {
@@ -53,7 +62,36 @@ export class EasAttestationWatcher {
     this.unwatch = undefined;
   }
 
-  private async handleLog(log: { args: { uid?: Hex; attester?: Address } }): Promise<void> {
+  private async backfillRecentLogs(): Promise<void> {
+    const backfillBlocks = this.options.backfillBlocks ?? 500n;
+    if (backfillBlocks <= 0n) return;
+
+    try {
+      const head = await this.publicClient.getBlockNumber();
+      const fromBlock = head > backfillBlocks ? head - backfillBlocks : 0n;
+      const logs = await this.publicClient.getContractEvents({
+        address: this.easAddress,
+        abi: mockEASAbi,
+        eventName: "Attested",
+        args: { schema: this.schemaUID },
+        fromBlock,
+        toBlock: head,
+      });
+      this.handleLogs(logs as EasAttestedLog[]);
+    } catch (e) {
+      this.logger?.warn(`eas-watcher backfill failed: ${(e as Error).message}`);
+    }
+  }
+
+  private handleLogs(logs: EasAttestedLog[]): void {
+    for (const log of logs) {
+      this.handleLog(log).catch((e) => {
+        this.logger?.warn(`eas-watcher handleLog failed: ${(e as Error).message}`);
+      });
+    }
+  }
+
+  private async handleLog(log: EasAttestedLog): Promise<void> {
     const uid = log.args.uid;
     const attester = log.args.attester;
     if (!uid || !attester) return;
