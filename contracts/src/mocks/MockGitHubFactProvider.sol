@@ -40,12 +40,7 @@ contract MockGitHubFactProvider is IGitHubFactProvider {
         emit FactFulfilled(claimId, lastRequestId[claimId], factBlob, "");
     }
 
-    function getFact(bytes32 claimId)
-        external
-        view
-        override
-        returns (bool ready, bytes memory factBlob)
-    {
+    function getFact(bytes32 claimId) external view override returns (bool ready, bytes memory factBlob) {
         Fact memory f = _facts[claimId];
         return (f.ready, f.blob);
     }

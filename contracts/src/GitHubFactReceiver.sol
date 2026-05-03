@@ -2,9 +2,7 @@
 pragma solidity ^0.8.26;
 
 import {FunctionsClient} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/FunctionsClient.sol";
-import {
-    FunctionsRequest
-} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
+import {FunctionsRequest} from "@chainlink/contracts/src/v0.8/functions/v1_0_0/libraries/FunctionsRequest.sol";
 
 import {IGitHubFactProvider} from "./interfaces/IGitHubFactProvider.sol";
 
@@ -123,29 +121,19 @@ contract GitHubFactReceiver is FunctionsClient, IGitHubFactProvider {
         args[2] = _uintToString(uint256(kind));
         req.setArgs(args);
 
-        requestId = _sendRequest(
-            req.encodeCBOR(), config.subscriptionId, config.callbackGasLimit, config.donId
-        );
+        requestId = _sendRequest(req.encodeCBOR(), config.subscriptionId, config.callbackGasLimit, config.donId);
         requestIdOf[claimId] = requestId;
         claimIdOfRequest[requestId] = claimId;
     }
 
-    function getFact(bytes32 claimId)
-        external
-        view
-        override
-        returns (bool ready, bytes memory factBlob)
-    {
+    function getFact(bytes32 claimId) external view override returns (bool ready, bytes memory factBlob) {
         Fact memory f = _facts[claimId];
         return (f.ready, f.blob);
     }
 
     // ---------- Chainlink callback ----------
 
-    function fulfillRequest(bytes32 requestId, bytes memory response, bytes memory err)
-        internal
-        override
-    {
+    function fulfillRequest(bytes32 requestId, bytes memory response, bytes memory err) internal override {
         bytes32 claimId = claimIdOfRequest[requestId];
         if (claimId == bytes32(0)) revert UnknownRequest();
         delete claimIdOfRequest[requestId];

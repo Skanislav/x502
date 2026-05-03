@@ -43,8 +43,7 @@ contract Deploy is Script {
         uint64 secretsVersion = uint64(vm.envOr("SECRETS_VERSION", uint256(0)));
         address authorizer = vm.envOr("AUTHORIZER", deployer);
 
-        string memory sourcePath =
-            vm.envOr("FUNCTIONS_SOURCE_PATH", string("../chainlink/source.js"));
+        string memory sourcePath = vm.envOr("FUNCTIONS_SOURCE_PATH", string("../chainlink/source.js"));
         string memory source = vm.readFile(sourcePath);
 
         vm.startBroadcast(deployerKey);

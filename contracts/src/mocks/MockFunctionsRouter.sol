@@ -2,8 +2,7 @@
 pragma solidity ^0.8.26;
 
 interface IFunctionsClient {
-    function handleOracleFulfillment(bytes32 requestId, bytes memory response, bytes memory err)
-        external;
+    function handleOracleFulfillment(bytes32 requestId, bytes memory response, bytes memory err) external;
 }
 
 /// @notice Stand-in for Chainlink's FunctionsRouter, used by forge tests.
@@ -44,12 +43,7 @@ contract MockFunctionsRouter {
     }
 
     /// @notice Test-only: simulate the DON delivering a response.
-    function fulfill(
-        address consumer,
-        bytes32 requestId,
-        bytes calldata response,
-        bytes calldata err
-    ) external {
+    function fulfill(address consumer, bytes32 requestId, bytes calldata response, bytes calldata err) external {
         IFunctionsClient(consumer).handleOracleFulfillment(requestId, response, err);
     }
 }

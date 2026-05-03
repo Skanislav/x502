@@ -31,17 +31,12 @@ contract BountyVaultEdgesTest is Test {
 
     bytes32 internal constant REPO_A = keccak256("github.com/owner/repo-a");
     bytes32 internal constant REPO_B = keccak256("github.com/owner/repo-b");
-    bytes32 internal constant SCHEMA_UID =
-        keccak256("x502:bytes32 claimId,bytes32 factHash,bool accept");
+    bytes32 internal constant SCHEMA_UID = keccak256("x502:bytes32 claimId,bytes32 factHash,bool accept");
     uint256 internal constant DEPOSIT = 1_000_000_000;
     uint256 internal constant OUTCOME_FEE = 100_000;
 
-    BountyVault.Prices internal prices = BountyVault.Prices({
-        report: 5_000_000,
-        triage: 2_000_000,
-        fix: 50_000_000,
-        docsTests: 30_000_000
-    });
+    BountyVault.Prices internal prices =
+        BountyVault.Prices({report: 5_000_000, triage: 2_000_000, fix: 50_000_000, docsTests: 30_000_000});
 
     event Paid(
         bytes32 indexed claimId,
@@ -59,9 +54,7 @@ contract BountyVaultEdgesTest is Test {
         registry = new MockAgentRegistry();
         factProvider = new MockGitHubFactProvider();
         eas = new MockEAS();
-        vault = new BountyVault(
-            IERC20(address(usdc)), registry, factProvider, IEAS(address(eas)), SCHEMA_UID
-        );
+        vault = new BountyVault(IERC20(address(usdc)), registry, factProvider, IEAS(address(eas)), SCHEMA_UID);
 
         agentIds = new uint256[](N_AGENTS);
         agentWallets = new address[](N_AGENTS);
@@ -96,11 +89,7 @@ contract BountyVaultEdgesTest is Test {
         for (uint256 i; i < N_AGENTS; ++i) {
             assertEq(usdc.balanceOf(agentWallets[i]), OUTCOME_FEE, "all attesters paid");
         }
-        assertEq(
-            usdc.balanceOf(claimant),
-            prices.fix - N_AGENTS * OUTCOME_FEE,
-            "claimant gets price - sum(fees)"
-        );
+        assertEq(usdc.balanceOf(claimant), prices.fix - N_AGENTS * OUTCOME_FEE, "claimant gets price - sum(fees)");
     }
 
     // ---------- event emission ----------
@@ -122,14 +111,7 @@ contract BountyVaultEdgesTest is Test {
         expectedAttesters[1] = agentWallets[1];
 
         vm.expectEmit(true, true, false, true, address(vault));
-        emit Paid(
-            cid,
-            REPO_A,
-            BountyVault.Kind.Fix,
-            claimant,
-            prices.fix - 2 * OUTCOME_FEE,
-            expectedAttesters
-        );
+        emit Paid(cid, REPO_A, BountyVault.Kind.Fix, claimant, prices.fix - 2 * OUTCOME_FEE, expectedAttesters);
         vault.payout(REPO_A, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, uids);
     }
 
@@ -155,8 +137,7 @@ contract BountyVaultEdgesTest is Test {
     function test_sameExternalIdDifferentKind_doesNotCollide() public {
         uint256 externalId = 7;
         bytes32 cidFix = Attestations.claimId(REPO_A, externalId, uint8(BountyVault.Kind.Fix));
-        bytes32 cidDocs =
-            Attestations.claimId(REPO_A, externalId, uint8(BountyVault.Kind.DocsTests));
+        bytes32 cidDocs = Attestations.claimId(REPO_A, externalId, uint8(BountyVault.Kind.DocsTests));
         assertTrue(cidFix != cidDocs);
 
         _payHappyKind(REPO_A, externalId, BountyVault.Kind.Fix, claimant);
@@ -164,10 +145,7 @@ contract BountyVaultEdgesTest is Test {
 
         assertTrue(vault.isPaid(cidFix));
         assertTrue(vault.isPaid(cidDocs));
-        assertEq(
-            usdc.balanceOf(claimant),
-            (prices.fix - 2 * OUTCOME_FEE) + (prices.docsTests - 2 * OUTCOME_FEE)
-        );
+        assertEq(usdc.balanceOf(claimant), (prices.fix - 2 * OUTCOME_FEE) + (prices.docsTests - 2 * OUTCOME_FEE));
     }
 
     // ---------- repo lifecycle edges ----------
@@ -175,9 +153,7 @@ contract BountyVaultEdgesTest is Test {
     function test_configureRepo_revertsForThresholdZero() public {
         vm.prank(makeAddr("thresholdZeroOwner"));
         vm.expectRevert(BountyVault.ThresholdZero.selector);
-        vault.configureRepo(
-            keccak256("github.com/owner/threshold-zero"), agentIds, 0, prices, OUTCOME_FEE
-        );
+        vault.configureRepo(keccak256("github.com/owner/threshold-zero"), agentIds, 0, prices, OUTCOME_FEE);
     }
 
     function test_deposit_revertsForUnconfiguredRepo() public {
@@ -270,12 +246,7 @@ contract BountyVaultEdgesTest is Test {
         _payHappyKind(repoId, externalId, BountyVault.Kind.Fix, recipient);
     }
 
-    function _payHappyKind(
-        bytes32 repoId,
-        uint256 externalId,
-        BountyVault.Kind kind,
-        address recipient
-    ) internal {
+    function _payHappyKind(bytes32 repoId, uint256 externalId, BountyVault.Kind kind, address recipient) internal {
         bytes32 cid = Attestations.claimId(repoId, externalId, uint8(kind));
         bytes memory factBlob = abi.encode(uint8(1), uint64(1), bytes32(0), recipient);
         if (!_isReady(cid)) factProvider.mockFulfill(cid, factBlob);
@@ -292,10 +263,7 @@ contract BountyVaultEdgesTest is Test {
         (ready,) = factProvider.getFact(cid);
     }
 
-    function _attest(address attester, bytes32 cid, bytes32 factHash, bool accept)
-        internal
-        returns (bytes32 uid)
-    {
+    function _attest(address attester, bytes32 cid, bytes32 factHash, bool accept) internal returns (bytes32 uid) {
         AttestationRequestData memory data = AttestationRequestData({
             recipient: address(0),
             expirationTime: 0,

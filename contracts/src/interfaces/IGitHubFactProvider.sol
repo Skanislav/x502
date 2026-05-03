@@ -15,7 +15,5 @@ interface IGitHubFactProvider {
     function getFact(bytes32 claimId) external view returns (bool ready, bytes memory factBlob);
 
     /// @notice Emitted exactly once per claimId when the oracle fulfills.
-    event FactFulfilled(
-        bytes32 indexed claimId, bytes32 indexed requestId, bytes factBlob, bytes err
-    );
+    event FactFulfilled(bytes32 indexed claimId, bytes32 indexed requestId, bytes factBlob, bytes err);
 }

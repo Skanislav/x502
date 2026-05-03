@@ -17,9 +17,7 @@ interface ISchemaRegistry {
         string schema;
     }
 
-    function register(string calldata schema, address resolver, bool revocable)
-        external
-        returns (bytes32);
+    function register(string calldata schema, address resolver, bool revocable) external returns (bytes32);
 
     function getSchema(bytes32 uid) external view returns (SchemaRecord memory);
 }
