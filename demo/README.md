@@ -104,7 +104,14 @@ remainder when `total % n != 0`. Repro: `splitEvenly(10, 3).reduce((a,b) => a+b)
 Expected: sum equals input `total` for any non-negative integer inputs.
 
 <!-- x502-commitment:0x... -->
+<!-- x502:0xALICE_WALLET -->
 ```
+
+The `x502-commitment` marker binds the GH author to her ERC-8004 agent id;
+the `x502:0xWALLET` marker is what the DON parses into the fact's
+`ghAuthorBinding`. The vault rejects payouts whose `recipient` doesn't
+match that binding (`RecipientNotBound`), so both markers are required —
+the same pair of lines for `triage`, `fix`, and `docs_tests`.
 
 Alice then claims:
 
