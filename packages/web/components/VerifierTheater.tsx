@@ -13,6 +13,11 @@ interface AgentColumn {
   uid?: string;
 }
 
+interface AttestationDelta {
+  status: "attested";
+  uid: string;
+}
+
 interface FactState {
   status?: number;
   mergedBlock?: string;
@@ -34,14 +39,7 @@ export function VerifierTheater({
   /// set, each attested column links to `${easExplorerBase}/${uid}`.
   easExplorerBase?: string;
 }) {
-  const [agents, setAgents] = useState<Record<string, AgentColumn>>(() =>
-    Object.fromEntries(
-      agentSpecs.map((s) => [
-        s.address.toLowerCase(),
-        { agentId: s.agentId, attesterAddress: s.address, status: "idle" },
-      ]),
-    ),
-  );
+  const [deltas, setDeltas] = useState<Record<string, AttestationDelta>>({});
   const [fact, setFact] = useState<FactState>({});
   const [payoutTx, setPayoutTx] = useState<string | undefined>();
 
@@ -59,14 +57,7 @@ export function VerifierTheater({
         }
         if (event.type === "attestation.observed") {
           const key = event.attester.toLowerCase();
-          setAgents((s) => {
-            const slot = s[key];
-            if (!slot) return s;
-            return {
-              ...s,
-              [key]: { ...slot, status: "attested", uid: event.uid },
-            };
-          });
+          setDeltas((s) => ({ ...s, [key]: { status: "attested", uid: event.uid } }));
         }
         if (event.type === "payout.confirmed") {
           setPayoutTx(event.txHash);
@@ -113,8 +104,14 @@ export function VerifierTheater({
 
       <div className="grid grid-cols-3 gap-2">
         {agentSpecs.map((s) => {
-          const a = agents[s.address.toLowerCase()]!;
-          return <AgentColumnCard key={s.agentId} agent={a} explorer={easExplorerBase} />;
+          const delta = deltas[s.address.toLowerCase()];
+          const agent: AgentColumn = {
+            agentId: s.agentId,
+            attesterAddress: s.address,
+            status: delta?.status ?? "idle",
+            uid: delta?.uid,
+          };
+          return <AgentColumnCard key={s.agentId} agent={agent} explorer={easExplorerBase} />;
         })}
       </div>
 
