@@ -25,7 +25,9 @@ import {
   type WalletClient,
   createPublicClient,
   createWalletClient,
+  parseEther,
   parseUnits,
+  toHex,
 } from "viem";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { foundry } from "viem/chains";
@@ -185,6 +187,12 @@ async function main() {
     };
   });
 
+  const verifierGas = parseEther("1");
+  process.stdout.write("[seed] funding verifier wallets for EAS gas\n");
+  for (const v of verifiers) {
+    await setAnvilBalance(rpcUrl, v.address, verifierGas);
+  }
+
   process.stdout.write("[seed] registering verifier wallets\n");
   for (const v of verifiers) {
     await wallet.writeContract({
@@ -317,6 +325,22 @@ async function deployBytecode(
   const r = await publicClient.waitForTransactionReceipt({ hash: tx });
   if (!r.contractAddress) throw new Error(`deploy returned no address (tx=${tx})`);
   return r.contractAddress;
+}
+
+async function setAnvilBalance(rpcUrl: string, address: Address, balance: bigint): Promise<void> {
+  const r = await fetch(rpcUrl, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "anvil_setBalance",
+      params: [address, toHex(balance)],
+    }),
+  });
+  if (!r.ok) throw new Error(`anvil_setBalance HTTP ${r.status}`);
+  const body = (await r.json()) as { error?: { message?: string } };
+  if (body.error) throw new Error(`anvil_setBalance failed: ${body.error.message ?? "unknown"}`);
 }
 
 main().catch((e) => {

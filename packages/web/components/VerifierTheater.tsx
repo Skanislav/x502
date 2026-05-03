@@ -6,6 +6,11 @@ import { shortHash } from "../lib/format";
 
 type Status = "idle" | "attested";
 
+interface AgentSpec {
+  agentId: string;
+  address: string;
+}
+
 interface AgentColumn {
   agentId: string;
   attesterAddress: string;
@@ -34,7 +39,7 @@ export function VerifierTheater({
   claimId: string | undefined;
   /// (agentId, address) pairs from the demo runtime — used to map an
   /// observed attester back to the verifier identity for display.
-  agents: Array<{ agentId: string; address: string }>;
+  agents: AgentSpec[];
   /// Optional. Base URL for an attestation explorer (e.g. attest.org). When
   /// set, each attested column links to `${easExplorerBase}/${uid}`.
   easExplorerBase?: string;
@@ -104,13 +109,7 @@ export function VerifierTheater({
 
       <div className="grid grid-cols-3 gap-2">
         {agentSpecs.map((s) => {
-          const delta = deltas[s.address.toLowerCase()];
-          const agent: AgentColumn = {
-            agentId: s.agentId,
-            attesterAddress: s.address,
-            status: delta?.status ?? "idle",
-            uid: delta?.uid,
-          };
+          const agent = agentColumnFromSpec(s, deltas);
           return <AgentColumnCard key={s.agentId} agent={agent} explorer={easExplorerBase} />;
         })}
       </div>
@@ -123,6 +122,19 @@ export function VerifierTheater({
       )}
     </section>
   );
+}
+
+export function agentColumnFromSpec(
+  spec: AgentSpec,
+  deltas: Record<string, AttestationDelta>,
+): AgentColumn {
+  const delta = deltas[spec.address.toLowerCase()];
+  return {
+    agentId: spec.agentId,
+    attesterAddress: spec.address,
+    status: delta?.status ?? "idle",
+    uid: delta?.uid,
+  };
 }
 
 function AgentColumnCard({

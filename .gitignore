@@ -6,6 +6,10 @@ contracts/broadcast/
 # Node
 node_modules/
 .pnpm-store/
+demo/.runtime/
+demo/scripts/skill-env.sh
+.playwright-cli/
+BRANCH-NOTES.md
 *.tsbuildinfo
 dist/
 build/

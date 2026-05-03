@@ -78,6 +78,25 @@ describe("GET /health", () => {
   });
 });
 
+describe("CORS", () => {
+  it("allows the web demo to preflight claim submission", async () => {
+    const coord = makeCoord();
+    const r = await coord.app.request("/claim", {
+      method: "OPTIONS",
+      headers: {
+        origin: "http://127.0.0.1:3000",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type",
+      },
+    });
+
+    expect(r.status).toBe(204);
+    expect(r.headers.get("access-control-allow-origin")).toBe("http://127.0.0.1:3000");
+    expect(r.headers.get("access-control-allow-methods")).toContain("POST");
+    expect(r.headers.get("access-control-allow-headers")).toContain("content-type");
+  });
+});
+
 describe("POST /claim — input validation", () => {
   it("rejects bad repoSlug", async () => {
     const coord = makeCoord();

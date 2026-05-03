@@ -1,5 +1,6 @@
 import { EventBus, Kind, type KindName, deriveClaimId } from "@x502/shared";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { streamSSE } from "hono/streaming";
 import { type Address, type Hex, isAddress } from "viem";
 
@@ -89,6 +90,15 @@ export function buildCoordinator(opts: CoordinatorOptions): Coordinator {
   const events = new EventBus();
   const inbox = new AttestationInbox();
   const app = new Hono();
+
+  app.use(
+    "*",
+    cors({
+      origin: (origin) => origin || "*",
+      allowMethods: ["GET", "POST", "OPTIONS"],
+      allowHeaders: ["content-type"],
+    }),
+  );
 
   paymentGate.apply(app);
 
