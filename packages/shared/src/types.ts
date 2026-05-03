@@ -19,19 +19,6 @@ export const KindName = {
 
 export type KindName = (typeof KindName)[Kind];
 
-export interface Attestation {
-  claimId: Hex;
-  recipient: Address;
-  deadline: bigint;
-  factHash: Hex;
-}
-
-export interface SignedAttestation {
-  attestation: Attestation;
-  signature: Hex;
-  agentId: bigint;
-}
-
 export interface ClaimRequest {
   repoId: Hex; // bytes32
   externalId: bigint; // GH issue or PR number

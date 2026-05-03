@@ -31,7 +31,8 @@ contract BountyVaultEdgesTest is Test {
 
     bytes32 internal constant REPO_A = keccak256("github.com/owner/repo-a");
     bytes32 internal constant REPO_B = keccak256("github.com/owner/repo-b");
-    bytes32 internal constant SCHEMA_UID = keccak256("x502:bytes32 claimId,bytes32 factHash,bool accept");
+    bytes32 internal constant SCHEMA_UID =
+        keccak256("x502:bytes32 claimId,bytes32 factHash,bool accept");
     uint256 internal constant DEPOSIT = 1_000_000_000;
     uint256 internal constant OUTCOME_FEE = 100_000;
 
