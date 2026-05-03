@@ -13,12 +13,18 @@ contract MockEAS is IEAS {
     mapping(bytes32 => Attestation) private _attestations;
     uint256 private _nonce;
 
-    event Attested(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schema);
-    event Revoked(address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schema);
+    event Attested(
+        address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schema
+    );
+    event Revoked(
+        address indexed recipient, address indexed attester, bytes32 uid, bytes32 indexed schema
+    );
 
     function attest(AttestationRequest calldata request) external payable returns (bytes32 uid) {
         ++_nonce;
-        uid = keccak256(abi.encode(request.schema, msg.sender, request.data.data, _nonce, block.timestamp));
+        uid = keccak256(
+            abi.encode(request.schema, msg.sender, request.data.data, _nonce, block.timestamp)
+        );
         _attestations[uid] = Attestation({
             uid: uid,
             schema: request.schema,

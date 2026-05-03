@@ -101,7 +101,13 @@ contract BountyVault is ReentrancyGuard {
     error ThresholdZero();
     error PriceUnderflow();
 
-    constructor(IERC20 _usdc, IAgentRegistry _registry, IGitHubFactProvider _facts, IEAS _eas, bytes32 _schemaUID) {
+    constructor(
+        IERC20 _usdc,
+        IAgentRegistry _registry,
+        IGitHubFactProvider _facts,
+        IEAS _eas,
+        bytes32 _schemaUID
+    ) {
         usdc = _usdc;
         agentRegistry = _registry;
         factProvider = _facts;
@@ -213,11 +219,12 @@ contract BountyVault is ReentrancyGuard {
         emit Paid(claimId, repoId, kind, recipient, claimantAmount, attesters);
     }
 
-    function _validateAttestations(RepoConfig storage cfg, bytes32 claimId, bytes32 factHash, bytes32[] calldata uids)
-        internal
-        view
-        returns (address[] memory attesters)
-    {
+    function _validateAttestations(
+        RepoConfig storage cfg,
+        bytes32 claimId,
+        bytes32 factHash,
+        bytes32[] calldata uids
+    ) internal view returns (address[] memory attesters) {
         attesters = new address[](uids.length);
         address[] memory trustedSet = _resolveTrustedSet(cfg);
 
@@ -230,7 +237,8 @@ contract BountyVault is ReentrancyGuard {
                 revert AttestationExpired(uids[i]);
             }
 
-            (bytes32 attClaimId, bytes32 attFactHash, bool accept) = abi.decode(att.data, (bytes32, bytes32, bool));
+            (bytes32 attClaimId, bytes32 attFactHash, bool accept) =
+                abi.decode(att.data, (bytes32, bytes32, bool));
             if (attClaimId != claimId) revert AttestationClaimMismatch(uids[i]);
             if (attFactHash != factHash) revert AttestationFactMismatch(uids[i]);
             if (!accept) revert AttestationDeclined(uids[i]);

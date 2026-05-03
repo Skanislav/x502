@@ -33,19 +33,23 @@ contract BountyVaultTest is Test {
     address[] internal agentWallets;
 
     bytes32 internal constant REPO_ID = keccak256("github.com/x502-protocol/demo");
-    bytes32 internal constant SCHEMA_UID = keccak256("x502:bytes32 claimId,bytes32 factHash,bool accept");
+    bytes32 internal constant SCHEMA_UID =
+        keccak256("x502:bytes32 claimId,bytes32 factHash,bool accept");
     uint256 internal constant DEPOSIT = 1_000_000_000;
     uint256 internal constant OUTCOME_FEE = 100_000;
 
-    BountyVault.Prices internal defaultPrices =
-        BountyVault.Prices({report: 5_000_000, triage: 2_000_000, fix: 50_000_000, docsTests: 30_000_000});
+    BountyVault.Prices internal defaultPrices = BountyVault.Prices({
+        report: 5_000_000, triage: 2_000_000, fix: 50_000_000, docsTests: 30_000_000
+    });
 
     function setUp() public {
         usdc = new MockUSDC();
         registry = new MockAgentRegistry();
         factProvider = new MockGitHubFactProvider();
         eas = new MockEAS();
-        vault = new BountyVault(IERC20(address(usdc)), registry, factProvider, IEAS(address(eas)), SCHEMA_UID);
+        vault = new BountyVault(
+            IERC20(address(usdc)), registry, factProvider, IEAS(address(eas)), SCHEMA_UID
+        );
 
         agentIds = new uint256[](N_AGENTS);
         agentWallets = new address[](N_AGENTS);
@@ -74,7 +78,8 @@ contract BountyVaultTest is Test {
         BountyVault.Kind kind = BountyVault.Kind.Fix;
         bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(kind));
 
-        bytes memory factBlob = abi.encode(uint8(1), uint64(123_456), bytes32(uint256(0xABCD)), claimant);
+        bytes memory factBlob =
+            abi.encode(uint8(1), uint64(123_456), bytes32(uint256(0xABCD)), claimant);
         factProvider.mockFulfill(cid, factBlob);
 
         uint256 deadline = block.timestamp + 30 minutes;
@@ -92,7 +97,11 @@ contract BountyVaultTest is Test {
 
         assertEq(usdc.balanceOf(agentWallets[0]) - priorAgent0, OUTCOME_FEE, "agent0 fee");
         assertEq(usdc.balanceOf(agentWallets[1]) - priorAgent1, OUTCOME_FEE, "agent1 fee");
-        assertEq(usdc.balanceOf(claimant) - priorClaimant, defaultPrices.fix - 2 * OUTCOME_FEE, "claimant payout");
+        assertEq(
+            usdc.balanceOf(claimant) - priorClaimant,
+            defaultPrices.fix - 2 * OUTCOME_FEE,
+            "claimant payout"
+        );
         assertEq(vault.balanceOf(REPO_ID), DEPOSIT - defaultPrices.fix, "repo balance debited");
         assertTrue(vault.isPaid(cid), "claim marked paid");
     }
@@ -152,7 +161,9 @@ contract BountyVaultTest is Test {
         uids[0] = _attest(agentWallets[0], cid, factHash, true);
         uids[1] = _attest(agentWallets[0], cid, factHash, true); // same attester twice
 
-        vm.expectRevert(abi.encodeWithSelector(BountyVault.DuplicateAttester.selector, agentWallets[0]));
+        vm.expectRevert(
+            abi.encodeWithSelector(BountyVault.DuplicateAttester.selector, agentWallets[0])
+        );
         vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, uids);
     }
 
@@ -263,7 +274,9 @@ contract BountyVaultTest is Test {
         uids[0] = _attest(agentWallets[0], cid, factHash, true);
         uids[1] = uidStale;
 
-        vm.expectRevert(abi.encodeWithSelector(BountyVault.AttestationFactMismatch.selector, uidStale));
+        vm.expectRevert(
+            abi.encodeWithSelector(BountyVault.AttestationFactMismatch.selector, uidStale)
+        );
         vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, uids);
     }
 
@@ -281,7 +294,9 @@ contract BountyVaultTest is Test {
         uids[0] = _attest(agentWallets[0], cid, factHash, true);
         uids[1] = uidWrong;
 
-        vm.expectRevert(abi.encodeWithSelector(BountyVault.AttestationClaimMismatch.selector, uidWrong));
+        vm.expectRevert(
+            abi.encodeWithSelector(BountyVault.AttestationClaimMismatch.selector, uidWrong)
+        );
         vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, factHash, uids);
     }
 
@@ -364,7 +379,9 @@ contract BountyVaultTest is Test {
         uids[1] = _attest(agentWallets[1], cid, factHash, true);
 
         uint256 priorClaimant = usdc.balanceOf(claimant);
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Report, claimant, deadline, factHash, uids);
+        vault.payout(
+            REPO_ID, externalId, BountyVault.Kind.Report, claimant, deadline, factHash, uids
+        );
         assertEq(
             usdc.balanceOf(claimant) - priorClaimant,
             defaultPrices.report - 2 * OUTCOME_FEE,
@@ -385,7 +402,9 @@ contract BountyVaultTest is Test {
         uids[1] = _attest(agentWallets[1], cid, wrongFactHash, true);
 
         vm.expectRevert(BountyVault.FactHashMismatch.selector);
-        vault.payout(REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, wrongFactHash, uids);
+        vault.payout(
+            REPO_ID, externalId, BountyVault.Kind.Fix, claimant, deadline, wrongFactHash, uids
+        );
     }
 
     // ---------- deadline / balance ----------
@@ -466,7 +485,9 @@ contract BountyVaultTest is Test {
 
         // Stranger tries to redirect the payout to themselves.
         vm.prank(stranger);
-        vm.expectRevert(abi.encodeWithSelector(BountyVault.RecipientNotBound.selector, stranger, claimant));
+        vm.expectRevert(
+            abi.encodeWithSelector(BountyVault.RecipientNotBound.selector, stranger, claimant)
+        );
         vault.payout(REPO_ID, externalId, kind, stranger, deadline, factHash, uids);
     }
 
@@ -484,22 +505,30 @@ contract BountyVaultTest is Test {
         uids[0] = _attest(agentWallets[0], cid, factHash, true);
         uids[1] = _attest(agentWallets[1], cid, factHash, true);
 
-        vm.expectRevert(abi.encodeWithSelector(BountyVault.RecipientNotBound.selector, claimant, address(0)));
+        vm.expectRevert(
+            abi.encodeWithSelector(BountyVault.RecipientNotBound.selector, claimant, address(0))
+        );
         vault.payout(REPO_ID, externalId, kind, claimant, deadline, factHash, uids);
     }
 
     // ---------- helpers ----------
 
     /// @dev Attest under the vault's expected schema with (claimId, factHash, accept).
-    function _attest(address attester, bytes32 cid, bytes32 factHash, bool accept) internal returns (bytes32 uid) {
+    function _attest(address attester, bytes32 cid, bytes32 factHash, bool accept)
+        internal
+        returns (bytes32 uid)
+    {
         return _attestRaw(attester, SCHEMA_UID, cid, factHash, accept);
     }
 
     /// @dev Variant that lets callers force a different schema (negative-path tests).
-    function _attestRaw(address attester, bytes32 schema, bytes32 cid, bytes32 factHash, bool accept)
-        internal
-        returns (bytes32 uid)
-    {
+    function _attestRaw(
+        address attester,
+        bytes32 schema,
+        bytes32 cid,
+        bytes32 factHash,
+        bool accept
+    ) internal returns (bytes32 uid) {
         AttestationRequestData memory data = AttestationRequestData({
             recipient: address(0),
             expirationTime: 0,

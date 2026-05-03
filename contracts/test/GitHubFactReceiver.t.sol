@@ -140,7 +140,8 @@ contract GitHubFactReceiverTest is Test {
         assertEq(receiver.requestIdOf(claimId), requestId);
         assertEq(receiver.claimIdOfRequest(requestId), claimId);
 
-        (uint64 subId, bytes memory data, uint16 dataVersion, uint32 gas, bytes32 donId) = router.last();
+        (uint64 subId, bytes memory data, uint16 dataVersion, uint32 gas, bytes32 donId) =
+            router.last();
         assertEq(subId, 11);
         assertGt(data.length, 0);
         assertEq(dataVersion, 1);
@@ -159,7 +160,8 @@ contract GitHubFactReceiverTest is Test {
         vm.prank(authorizer);
         bytes32 requestId = receiver.requestFact(CLAIM_ID, "foo/bar", 42, 2);
 
-        bytes memory factBlob = abi.encode(uint8(1), uint64(123), bytes32(uint256(0xAB)), address(0xBEEF));
+        bytes memory factBlob =
+            abi.encode(uint8(1), uint64(123), bytes32(uint256(0xAB)), address(0xBEEF));
 
         vm.expectEmit(true, true, false, true, address(receiver));
         emit IGitHubFactProviderEvent.FactFulfilled(CLAIM_ID, requestId, factBlob, "");
@@ -205,5 +207,7 @@ contract GitHubFactReceiverTest is Test {
 
 /// Hack to import the IGitHubFactProvider event for `vm.expectEmit`.
 interface IGitHubFactProviderEvent {
-    event FactFulfilled(bytes32 indexed claimId, bytes32 indexed requestId, bytes factBlob, bytes err);
+    event FactFulfilled(
+        bytes32 indexed claimId, bytes32 indexed requestId, bytes factBlob, bytes err
+    );
 }

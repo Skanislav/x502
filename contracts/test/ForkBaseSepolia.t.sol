@@ -28,7 +28,8 @@ contract ForkBaseSepoliaTest is Test {
     /// EAS + SchemaRegistry are both Optimism predeploys on Base + Base
     /// Sepolia at sequential addresses. https://docs.attest.org/
     address internal constant EAS_BASE_SEPOLIA = 0x4200000000000000000000000000000000000021;
-    address internal constant SCHEMA_REGISTRY_BASE_SEPOLIA = 0x4200000000000000000000000000000000000020;
+    address internal constant SCHEMA_REGISTRY_BASE_SEPOLIA =
+        0x4200000000000000000000000000000000000020;
 
     /// Canonical x502 schema string. Vault rejects attestations under any
     /// other schemaUID.
@@ -46,8 +47,9 @@ contract ForkBaseSepoliaTest is Test {
     uint256 internal constant DEPOSIT = 1_000_000_000;
     uint256 internal constant OUTCOME_FEE = 100_000;
 
-    BountyVault.Prices internal defaultPrices =
-        BountyVault.Prices({report: 5_000_000, triage: 2_000_000, fix: 50_000_000, docsTests: 30_000_000});
+    BountyVault.Prices internal defaultPrices = BountyVault.Prices({
+        report: 5_000_000, triage: 2_000_000, fix: 50_000_000, docsTests: 30_000_000
+    });
 
     uint256[] internal agentIds;
     address[] internal agentWallets;
@@ -65,7 +67,9 @@ contract ForkBaseSepoliaTest is Test {
 
         registry = new MockAgentRegistry();
         factProvider = new MockGitHubFactProvider();
-        vault = new BountyVault(IERC20(USDC_BASE_SEPOLIA), registry, factProvider, IEAS(EAS_BASE_SEPOLIA), schemaUID);
+        vault = new BountyVault(
+            IERC20(USDC_BASE_SEPOLIA), registry, factProvider, IEAS(EAS_BASE_SEPOLIA), schemaUID
+        );
 
         for (uint256 i; i < 3; ++i) {
             address w = makeAddr(string.concat("agent", vm.toString(i)));
@@ -89,7 +93,8 @@ contract ForkBaseSepoliaTest is Test {
         BountyVault.Kind kind = BountyVault.Kind.Fix;
         bytes32 cid = Attestations.claimId(REPO_ID, externalId, uint8(kind));
 
-        bytes memory factBlob = abi.encode(uint8(1), uint64(123_456), bytes32(uint256(0xABCD)), claimant);
+        bytes memory factBlob =
+            abi.encode(uint8(1), uint64(123_456), bytes32(uint256(0xABCD)), claimant);
         factProvider.mockFulfill(cid, factBlob);
 
         uint256 deadline = block.timestamp + 30 minutes;
@@ -108,13 +113,18 @@ contract ForkBaseSepoliaTest is Test {
 
         assertEq(usdc.balanceOf(agentWallets[0]) - priorAgent0, OUTCOME_FEE, "agent0 fee");
         assertEq(usdc.balanceOf(agentWallets[1]) - priorAgent1, OUTCOME_FEE, "agent1 fee");
-        assertEq(usdc.balanceOf(claimant) - priorClaimant, defaultPrices.fix - 2 * OUTCOME_FEE, "claimant payout");
+        assertEq(
+            usdc.balanceOf(claimant) - priorClaimant,
+            defaultPrices.fix - 2 * OUTCOME_FEE,
+            "claimant payout"
+        );
         assertEq(vault.balanceOf(REPO_ID), DEPOSIT - defaultPrices.fix, "repo balance debited");
         assertTrue(vault.isPaid(cid), "claim marked paid");
     }
 
     function test_fork_usdcMetadata() public view {
-        (bool ok, bytes memory data) = USDC_BASE_SEPOLIA.staticcall(abi.encodeWithSignature("decimals()"));
+        (bool ok, bytes memory data) =
+            USDC_BASE_SEPOLIA.staticcall(abi.encodeWithSignature("decimals()"));
         require(ok, "decimals() call failed");
         assertEq(abi.decode(data, (uint8)), 6);
     }
@@ -135,7 +145,10 @@ contract ForkBaseSepoliaTest is Test {
         }
     }
 
-    function _attest(address attester, bytes32 cid, bytes32 factHash, bool accept) internal returns (bytes32 uid) {
+    function _attest(address attester, bytes32 cid, bytes32 factHash, bool accept)
+        internal
+        returns (bytes32 uid)
+    {
         AttestationRequestData memory data = AttestationRequestData({
             recipient: address(0),
             expirationTime: 0,
