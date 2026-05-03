@@ -39,7 +39,9 @@ class ScriptedVault implements IVaultWriter {
     if (this.behavior.type === "revert") {
       throw new Error(this.behavior.reason ?? "PriceUnderflow()");
     }
-    return `0x${"cd".repeat(32)}` as Hex;
+    const txHash = `0x${"cd".repeat(32)}` as Hex;
+    args.onSubmitted?.(txHash);
+    return txHash;
   }
 }
 

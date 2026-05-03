@@ -15,6 +15,11 @@ export interface IFactProvider {
 /// Submits the EAS-attested payout bundle on chain. The vault validates
 /// each UID against its global x502 schema; the coordinator's role is just
 /// to pre-select the right UIDs and call payout.
+///
+/// Resolves only after the tx has mined with a successful receipt; rejects
+/// on simulation failure, revert, or replacement. `onSubmitted` fires once
+/// the tx hash is known but before mining completes, so callers can stream
+/// a "submitted" event without blocking on confirmation.
 export interface IVaultWriter {
   submitPayout(args: {
     repoId: Hex;
@@ -24,6 +29,7 @@ export interface IVaultWriter {
     deadline: bigint;
     factHash: Hex;
     attestationUIDs: Hex[];
+    onSubmitted?: (txHash: Hex) => void;
   }): Promise<Hex>;
 }
 

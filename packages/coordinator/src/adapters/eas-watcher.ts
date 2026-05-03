@@ -90,10 +90,21 @@ export class EasAttestationWatcher {
 
     const state = this.claimResolver(claimId);
     if (!state || !state.factHash) return;
+    // The attester signed `(claimId, factHash, accept)`. If their factHash
+    // doesn't match the fact this coordinator is tracking for the claim,
+    // their attestation will be rejected on-chain by the vault — pushing
+    // it into the inbox would just let it count toward threshold and then
+    // revert payout. Drop and warn instead.
+    if (factHash.toLowerCase() !== state.factHash.toLowerCase()) {
+      this.logger?.warn(
+        `eas-watcher: attestation ${uid} factHash ${factHash} != state.factHash ${state.factHash}; dropping`,
+      );
+      return;
+    }
 
     const result = this.inbox.push({
       claimId,
-      factHash: state.factHash,
+      factHash,
       uid,
       attester: att.attester,
     });
