@@ -12,46 +12,61 @@ export type StepKey =
   | "payout"
   | "done";
 
-const STEPS: Array<{ key: StepKey; title: string; copy: string }> = [
+interface StepDef {
+  key: StepKey;
+  index: number;
+  title: string;
+  copy: string;
+}
+
+const STEPS: StepDef[] = [
   {
     key: "intro",
-    title: "1 · The setup",
-    copy: "A repo owner has funded a vault with USDC. Bounties pay out for verifiable GitHub outcomes (report, triage, fix, docs_tests).",
+    index: 1,
+    title: "Vault funded",
+    copy: "Repo owner funded a USDC vault and configured per-kind prices for report, triage, fix, and docs_tests bounties.",
   },
   {
     key: "draft-issue",
-    title: "2 · File the issue",
-    copy: "An agent (Alice) finds a bug. She files the GitHub issue. The issue number `#N` becomes part of her commitment.",
+    index: 2,
+    title: "Issue filed",
+    copy: "An agent finds a bug and files the GitHub issue. The issue number becomes part of the on-chain claim id.",
   },
   {
     key: "commitment",
-    title: "3 · Bind the commitment",
-    copy: "Alice computes `keccak256(agentId, repoId, externalId, salt)` and pastes it into the issue body. This binds the GH author to her wallet via ERC-8004.",
+    index: 3,
+    title: "Commitment bound",
+    copy: "Agent computes keccak256(agentId, repoId, externalId, salt) and pastes the marker into the issue body — binding GH author to wallet via ERC-8004.",
   },
   {
     key: "submit",
-    title: "4 · Submit the claim",
-    copy: "Alice POSTs the claim to the coordinator with her commitment reveal. The coordinator returns a claimId and starts the pipeline.",
+    index: 4,
+    title: "Claim submitted",
+    copy: "Agent POSTs the claim with reveal data; coordinator returns a deterministic claimId and starts the pipeline.",
   },
   {
     key: "fact",
-    title: "5 · DON delivers the fact",
-    copy: "Chainlink Functions (locally simulated) fetches the issue, applies the kind-specific rules from `chainlink/source-core.js`, and returns `(status, mergedBlock, labelMask, ghAuthorBinding)` on chain.",
+    index: 5,
+    title: "DON delivers fact",
+    copy: "Chainlink Functions runs the canonical source script, parses the issue, and returns (status, mergedBlock, labelMask, ghAuthorBinding) on chain.",
   },
   {
     key: "verifiers",
-    title: "6 · Verifiers attest",
-    copy: "Each verifier identity runs the `x502-verify` skill in their local Claude. The skill fetches the issue, applies the kind-specific rubric, and publishes an EAS attestation under the vault's schema for `(claimId, factHash, accept)`. The coordinator's EAS event watcher observes them on-chain until M of N have landed.",
+    index: 6,
+    title: "Verifiers attest",
+    copy: "Each trusted verifier identity runs the x502-verify skill, applies the kind-specific rubric, and publishes an EAS attestation under the vault's schema.",
   },
   {
     key: "payout",
-    title: "7 · Vault settles",
-    copy: "Coordinator submits `BountyVault.payout(...)` with the M attestation UIDs + factHash. The vault re-fetches each attestation by UID, validates schema/revocation/claim binding/trust, and transfers USDC to Alice + a tiny outcome fee to each attester.",
+    index: 7,
+    title: "Vault settles",
+    copy: "Coordinator submits BountyVault.payout with the M attestation UIDs + factHash. Vault validates schema/revocation/claim binding/trust, then pays USDC.",
   },
   {
     key: "done",
-    title: "8 · Paid",
-    copy: "Tx hash visible on Basescan (or local anvil). Alice has the bounty in her wallet, the protocol has a verifiable trail.",
+    index: 8,
+    title: "Paid",
+    copy: "Tx hash is on Basescan, claimant has the bounty, attesters earned the per-verifier outcome fee.",
   },
 ];
 
@@ -59,8 +74,6 @@ export interface CommitmentFormProps {
   repoSlug: string;
   externalId: string;
   recipient: string;
-  /// Already-derived commitment hash; pass `undefined` when inputs are
-  /// incomplete (the form shows a hint instead of a stale value).
   commitment: `0x${string}` | undefined;
   salt: string;
   onSaltChange: (salt: `0x${string}`) => void;
@@ -71,50 +84,127 @@ export function DemoStepper({
   commitmentForm,
 }: {
   current: StepKey;
-  /// When provided AND the active step is `commitment`, the stepper renders
-  /// inline copy/draft helpers so the user never has to manually shuffle
-  /// markers between this app and GitHub.
   commitmentForm?: CommitmentFormProps;
 }) {
   const currentIdx = STEPS.findIndex((s) => s.key === current);
+
   return (
-    <div className="space-y-3">
-      <h2 className="text-xs uppercase tracking-widest text-muted">Demo walkthrough</h2>
-      <ol className="space-y-2">
+    <section className="x502-card p-6 sm:p-7 space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="x502-eyebrow">Pipeline</h2>
+        <span className="text-2xs text-text-muted font-mono tabular-nums">
+          {Math.max(currentIdx, 0) + 1} / {STEPS.length}
+        </span>
+      </div>
+
+      <ol className="relative space-y-1">
+        {/* connecting rail */}
+        <div aria-hidden className="absolute left-[15px] top-3 bottom-3 w-px bg-line" />
+
         {STEPS.map((s, i) => {
           const done = i < currentIdx;
           const active = i === currentIdx;
+          const upcoming = i > currentIdx;
           return (
             <li
               key={s.key}
               className={[
-                "rounded border p-3 transition",
-                active
-                  ? "border-accent/60 bg-accent/5"
-                  : done
-                    ? "border-paper/10 opacity-60"
-                    : "border-paper/10 opacity-40",
+                "relative pl-10 pr-2 py-3 rounded-lg transition-colors",
+                active ? "bg-accent/5" : "",
               ].join(" ")}
             >
-              <div className="flex items-baseline justify-between text-sm">
-                <span className="font-semibold">{s.title}</span>
-                {done && <span className="text-xs text-accent">done</span>}
-                {active && <span className="text-xs text-accent animate-pulse">active</span>}
+              <StepDot done={done} active={active} index={s.index} />
+              <div className="space-y-1">
+                <div className="flex items-baseline gap-2">
+                  <span
+                    className={[
+                      "font-medium text-sm",
+                      done
+                        ? "text-text-muted line-through decoration-text-faint/40"
+                        : active
+                          ? "text-text-strong"
+                          : "text-text-muted",
+                    ].join(" ")}
+                  >
+                    {s.title}
+                  </span>
+                  {active && (
+                    <span className="text-2xs uppercase tracking-[0.18em] text-accent font-medium">
+                      active
+                    </span>
+                  )}
+                  {done && (
+                    <span className="text-2xs uppercase tracking-[0.18em] text-success/80 font-medium">
+                      done
+                    </span>
+                  )}
+                </div>
+                <p
+                  className={[
+                    "text-xs leading-relaxed",
+                    upcoming ? "text-text-faint" : "text-text-muted",
+                  ].join(" ")}
+                >
+                  {s.copy}
+                </p>
+                {active && s.key === "commitment" && commitmentForm && (
+                  <CommitmentForm form={commitmentForm} />
+                )}
               </div>
-              <p className="text-xs text-muted leading-5 mt-1">{s.copy}</p>
-              {active && s.key === "commitment" && commitmentForm && (
-                <CommitmentForm form={commitmentForm} />
-              )}
             </li>
           );
         })}
       </ol>
-    </div>
+    </section>
+  );
+}
+
+function StepDot({
+  done,
+  active,
+  index,
+}: {
+  done: boolean;
+  active: boolean;
+  index: number;
+}) {
+  if (done) {
+    return (
+      <span className="absolute left-2 top-3.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white shadow-glow">
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          role="img"
+          aria-label="step done"
+        >
+          <title>step done</title>
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </span>
+    );
+  }
+  if (active) {
+    return (
+      <span className="absolute left-2 top-3.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full bg-accent text-white shadow-glow animate-pulse-ring">
+        <span className="font-mono text-[11px] font-medium">{index}</span>
+      </span>
+    );
+  }
+  return (
+    <span className="absolute left-2 top-3.5 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full border border-line bg-ink-700 text-text-faint">
+      <span className="font-mono text-[11px]">{index}</span>
+    </span>
   );
 }
 
 function CommitmentForm({ form }: { form: CommitmentFormProps }) {
-  const [copied, setCopied] = useState<"none" | "marker" | "wallet">("none");
+  const [copied, setCopied] = useState<"none" | "marker">("none");
 
   const commitmentMarker = form.commitment
     ? `<!-- x502-commitment:${form.commitment} -->`
@@ -130,21 +220,21 @@ function CommitmentForm({ form }: { form: CommitmentFormProps }) {
     ? `https://github.com/${form.repoSlug}/issues/new?title=${encodeURIComponent("[x502] bug: ")}&body=${encodeURIComponent(issueBody)}`
     : undefined;
 
-  const copy = async (text: string, kind: "marker" | "wallet") => {
+  const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
-      setCopied(kind);
+      setCopied("marker");
       setTimeout(() => setCopied("none"), 1500);
     } catch {
-      /* clipboard API unavailable — user can select manually */
+      /* no clipboard — user can select manually */
     }
   };
 
   return (
-    <div className="pt-3 space-y-3 text-xs">
-      <div className="space-y-1">
+    <div className="mt-4 space-y-3 rounded-lg border border-line bg-ink-800/60 p-4 animate-fade-up">
+      <div className="space-y-1.5">
         <div className="flex items-baseline justify-between">
-          <span className="text-muted">commitment hash</span>
+          <span className="x502-eyebrow">commitment</span>
           <button
             type="button"
             onClick={() => form.onSaltChange(randomSalt())}
@@ -154,44 +244,46 @@ function CommitmentForm({ form }: { form: CommitmentFormProps }) {
           </button>
         </div>
         {form.commitment ? (
-          <code className="block font-mono text-[11px] break-all bg-paper/5 rounded p-2">
+          <code className="block font-mono text-[12px] leading-relaxed text-text-strong break-all">
             {form.commitment}
           </code>
         ) : (
-          <p className="text-muted text-[11px]">fill in repo, issue#, agentId, salt to derive</p>
+          <p className="text-text-muted text-[11px]">
+            fill in repo, issue#, agentId, salt to derive
+          </p>
         )}
       </div>
 
-      <div className="space-y-1">
-        <span className="text-muted">paste these two lines into the issue body</span>
-        <pre className="font-mono text-[10px] break-all bg-paper/5 rounded p-2 whitespace-pre-wrap leading-snug">
+      <div className="space-y-1.5">
+        <span className="x502-eyebrow">issue body markers</span>
+        <pre className="font-mono text-[10.5px] leading-snug bg-ink-900/80 border border-line rounded-md p-2.5 whitespace-pre-wrap break-all text-text-strong">
           {commitmentMarker ?? "<!-- x502-commitment:… -->"}
           {"\n"}
           {walletMarker ?? "<!-- x502:… -->"}
         </pre>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 pt-1">
           <button
             type="button"
             disabled={!commitmentMarker || !walletMarker}
-            onClick={() => copy(`${commitmentMarker}\n${walletMarker}`, "marker")}
-            className="px-2 py-1 rounded border border-paper/20 hover:border-accent disabled:opacity-30"
+            onClick={() => copy(`${commitmentMarker}\n${walletMarker}`)}
+            className="x502-button-secondary"
           >
-            {copied === "marker" ? "copied!" : "copy markers"}
+            {copied === "marker" ? "copied" : "copy markers"}
           </button>
           {draftUrl && (
             <a
               href={draftUrl}
               target="_blank"
               rel="noreferrer"
-              className="px-2 py-1 rounded border border-accent/40 text-accent hover:bg-accent/10"
+              className="x502-button-secondary border-accent/40 text-accent hover:border-accent"
             >
-              draft issue on GitHub →
+              draft on GitHub →
             </a>
           )}
         </div>
-        <p className="text-muted text-[10px]">
-          GitHub will open with the body pre-filled. Submit the issue, copy its number back into the
-          form, then click "Submit claim".
+        <p className="text-text-muted text-[11px] leading-snug">
+          GitHub opens with the body pre-filled. Submit the issue, paste its number into the form,
+          then submit the claim.
         </p>
       </div>
     </div>
@@ -206,9 +298,6 @@ function randomSalt(): `0x${string}` {
   return s as `0x${string}`;
 }
 
-/// Maps the existing PipelineState onto the stepper's enum. Idle pipelines
-/// resolve to `commitment` because that's where the user is actually doing
-/// work pre-submission — the inline CommitmentForm lives in that step.
 export function stepFromPipeline(pipeline: {
   status: string;
   factReady?: boolean;

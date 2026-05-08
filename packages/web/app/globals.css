@@ -8,6 +8,133 @@
 
 html,
 body {
-  background: theme(colors.ink);
-  color: theme(colors.paper);
+  background: theme(colors.ink.DEFAULT);
+  color: theme(colors.text.strong);
+}
+
+/* The page sits on top of a deep ink base; we paint a soft radial accent
+   glow at top-right plus a faint dot grid at the very back, then fade
+   them so they never compete with content. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(1100px 540px at 88% -8%, rgba(91, 141, 255, 0.18), transparent 60%),
+    radial-gradient(800px 600px at -6% 110%, rgba(91, 141, 255, 0.07), transparent 55%);
+  z-index: 0;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(circle at 50% 30%, black 0%, transparent 70%);
+  opacity: 0.55;
+  z-index: 0;
+}
+
+main,
+header,
+footer,
+section,
+article {
+  position: relative;
+  z-index: 1;
+}
+
+/* Native scrollbar styling — matte, in-palette. */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Selection */
+::selection {
+  background: rgba(91, 141, 255, 0.32);
+  color: white;
+}
+
+@layer components {
+  .x502-input {
+    @apply w-full bg-ink-700/80 border border-line rounded-lg px-3.5 py-2.5 text-sm
+      text-text-strong placeholder:text-text-faint
+      transition-colors duration-150
+      focus:outline-none focus:border-accent focus:shadow-ring;
+  }
+
+  .x502-input-mono {
+    @apply x502-input font-mono text-[12.5px] tracking-tight;
+  }
+
+  .x502-card {
+    @apply rounded-2xl border border-line bg-ink-800/70 backdrop-blur-sm
+      shadow-card;
+  }
+
+  .x502-card-tight {
+    @apply x502-card p-5;
+  }
+
+  .x502-eyebrow {
+    @apply text-2xs uppercase tracking-[0.18em] font-medium text-text-muted;
+  }
+
+  .x502-pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line
+      bg-ink-700/80 px-2.5 py-1 text-[11px] uppercase tracking-[0.14em] text-text-muted;
+  }
+
+  .x502-pill-accent {
+    @apply x502-pill border-accent/40 bg-accent/10 text-accent;
+  }
+
+  .x502-pill-success {
+    @apply x502-pill border-success/40 bg-success/10 text-success;
+  }
+
+  .x502-pill-danger {
+    @apply x502-pill border-danger/40 bg-danger/10 text-danger;
+  }
+
+  .x502-link {
+    @apply text-accent decoration-accent/40 underline-offset-4 hover:underline transition-colors;
+  }
+
+  .x502-button {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl
+      bg-accent px-5 py-3 text-sm font-semibold text-white
+      shadow-glow transition-all duration-150
+      hover:bg-accent-soft hover:shadow-[0_0_0_1px_rgba(128,168,255,0.6),0_0_36px_-6px_rgba(128,168,255,0.55)]
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring
+      disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none;
+  }
+
+  .x502-button-secondary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg
+      border border-line bg-ink-700/80 px-3 py-2 text-xs font-medium
+      text-text-strong transition-colors duration-150
+      hover:border-line-strong hover:bg-ink-600
+      focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-ring
+      disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .x502-mono {
+    @apply font-mono tracking-tight text-[12.5px];
+  }
 }
