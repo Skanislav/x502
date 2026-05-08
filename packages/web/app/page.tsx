@@ -51,7 +51,11 @@ const KIND_META: Record<KindName, { label: string; price: bigint; description: s
 };
 
 const OUTCOME_FEE_PER_VERIFIER = 1_000n;
-const VERIFIER_COUNT = 2;
+/// Fallback verifier count for non-demo mode where we have no coordinator
+/// config to read from. The Base Sepolia demo configures one trusted
+/// attester (agent 5260, threshold 1); demo mode reads the actual count
+/// from /api/demo-config so the "you receive" amount stays accurate.
+const DEFAULT_VERIFIER_COUNT = 1;
 
 export default function Page() {
   const [coordinatorUrl, setCoordinatorUrl] = useState(DEFAULT_COORDINATOR);
@@ -86,7 +90,8 @@ export default function Page() {
   }, []);
 
   const meta = KIND_META[kind];
-  const claimantAmount = meta.price - OUTCOME_FEE_PER_VERIFIER * BigInt(VERIFIER_COUNT);
+  const verifierCount = demoCfg?.verifiers.length ?? DEFAULT_VERIFIER_COUNT;
+  const claimantAmount = meta.price - OUTCOME_FEE_PER_VERIFIER * BigInt(verifierCount);
   const stepperStep: StepKey = demoMode ? stepFromPipeline(pipeline) : "intro";
 
   const commitmentPreview = useMemo(
@@ -185,6 +190,7 @@ export default function Page() {
               pipeline={pipeline}
               meta={meta}
               claimantAmount={claimantAmount}
+              verifierCount={verifierCount}
               demoMode={demoMode}
             />
 
@@ -229,6 +235,7 @@ export default function Page() {
             pipeline={pipeline}
             meta={meta}
             claimantAmount={claimantAmount}
+            verifierCount={verifierCount}
             demoMode={demoMode}
           />
         </div>
@@ -330,6 +337,7 @@ function ClaimForm({
   pipeline,
   meta,
   claimantAmount,
+  verifierCount,
   demoMode,
 }: {
   coordinatorUrl: string;
@@ -351,6 +359,7 @@ function ClaimForm({
   pipeline: PipelineState;
   meta: { label: string; price: bigint; description: string };
   claimantAmount: bigint;
+  verifierCount: number;
   demoMode: boolean;
 }) {
   const [bindingOpen, setBindingOpen] = useState(demoMode);
@@ -503,10 +512,10 @@ function ClaimForm({
         </div>
         <div className="flex justify-between text-text-muted text-xs">
           <span>
-            verifier outcome fees ({VERIFIER_COUNT} × {formatUsdc(OUTCOME_FEE_PER_VERIFIER)})
+            verifier outcome fees ({verifierCount} × {formatUsdc(OUTCOME_FEE_PER_VERIFIER)})
           </span>
           <span className="font-mono tabular-nums">
-            −{formatUsdc(OUTCOME_FEE_PER_VERIFIER * BigInt(VERIFIER_COUNT))}
+            −{formatUsdc(OUTCOME_FEE_PER_VERIFIER * BigInt(verifierCount))}
           </span>
         </div>
         <div className="border-t border-line my-1.5" />
