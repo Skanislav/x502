@@ -21,10 +21,17 @@ export function loadDotEnv(repoRoot: string): void {
     if (!KEY_RE.test(key)) continue;
     if (process.env[key] !== undefined) continue;
     let value = line.slice(eq + 1).trim();
-    if (
+    // Strip inline comments only when the value is not quoted. A `#` that is
+    // preceded by whitespace and appears outside quotes ends the value.
+    const quoted =
       (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
+      (value.startsWith("'") && value.endsWith("'"));
+    if (!quoted) {
+      const commentMatch = value.match(/\s+#/);
+      if (commentMatch && commentMatch.index !== undefined) {
+        value = value.slice(0, commentMatch.index).trim();
+      }
+    } else {
       value = value.slice(1, -1);
     }
     process.env[key] = value;
