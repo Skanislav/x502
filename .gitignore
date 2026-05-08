@@ -11,7 +11,9 @@ demo/scripts/skill-env.sh
 .playwright-cli/
 BRANCH-NOTES.md
 .ralph-status.md
+.ralph-status-*.md
 .claude/ralph-loop.local.md
+.playwright-mcp/
 *.tsbuildinfo
 dist/
 build/

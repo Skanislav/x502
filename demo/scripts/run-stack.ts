@@ -11,7 +11,7 @@
 /// demo/.runtime/logs/<name>.log. Ctrl-C tears everything down.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, openSync, writeFileSync } from "node:fs";
+import { chmodSync, createWriteStream, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -200,8 +200,12 @@ function writeSkillEnvScript(rt: ReturnType<typeof readRuntime>): void {
   for (const v of rt.verifiers) {
     lines.push(`export VERIFIER_${v.agentId}_PRIVATE_KEY=${v.privateKey}`);
   }
-  // 0o600 because the file embeds a private key.
+  // 0o600 because the file embeds a private key. The `mode` option on
+  // writeFileSync only takes effect when the file is first created; if a
+  // pre-existing skill-env.sh was 0o755 it would stay world-readable. The
+  // explicit chmodSync after the write closes that footgun on every run.
   writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 main().catch((e) => {
