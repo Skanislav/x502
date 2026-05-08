@@ -23,42 +23,33 @@ Each defect has a configured price on the `BountyVault` contract:
 Verifier outcome fee (per attesting agent, deducted from the bounty) is
 **0.001 USDC**.
 
-## Run it locally
+## Run it (Base Sepolia)
 
 ```sh
-pnpm demo                              # boots anvil + seed + coordinator + web
+pnpm demo                              # boots seed + coordinator + web (Base Sepolia)
 source demo/scripts/skill-env.sh       # exports VERIFIER_<id>_PRIVATE_KEY + X502_*
 claude                                 # opens Claude Code
-> /x502-verify as agent 101            # publishes an EAS attestation
-> /x502-verify as agent 102            # second attestation → vault settles
+> /x502-verify as agent 5260           # publishes an EAS attestation
 ```
 
 `pnpm demo` boots:
-- **anvil** (local chain, port 8545; pass `BASE_SEPOLIA_RPC_URL` to fork)
-- **seed.ts** deploys mocks + MockEAS, registers the x502 schema, configures
-  `skanislav/x502` with three trusted verifier wallets
-- **coordinator** waits for claims; subscribes to EAS for matching attestations
-- **auto-fulfill watcher** simulates the Chainlink Functions DON
-- **Next.js web** at `http://127.0.0.1:3000/?mode=demo`
+- **seed.ts** writes `demo/.runtime/addresses.json` from `.env` + the
+  documented Base Sepolia constants in `docs/runbook-base-sepolia.md`. No
+  on-chain deploys — the vault, fact receiver, EAS, and SchemaRegistry are
+  the real live contracts.
+- **coordinator** wired to the live `BountyVault`; submits the on-chain
+  payout once the trusted verifier's EAS attestation is observed.
+- **Next.js web** at `http://127.0.0.1:3000/?mode=demo`.
 
-There are no long-running verifier processes any more. Each verifier identity
-is a human running `/x502-verify` in their own Claude Code session — the
-skill (`.claude/skills/x502-verify/SKILL.md`) applies the rubric and calls
+There are no long-running verifier processes. The verifier identity is a
+human running `/x502-verify` in their own Claude Code session — the skill
+(`.claude/skills/x502-verify/SKILL.md`) applies the rubric and calls
 `EAS.attest` via `demo/scripts/x502.ts`.
 
-### Fork mode (real EAS contracts)
-
-Set `BASE_SEPOLIA_RPC_URL` before `pnpm demo` and anvil starts as a fork:
-
-```sh
-BASE_SEPOLIA_RPC_URL=https://sepolia.base.org pnpm demo
-```
-
-The real EAS predeploy at `0x4200000000000000000000000000000000000021`
-and SchemaRegistry at `0x4200000000000000000000000000000000000020` are
-reachable; seed registers the x502 schema (idempotent) and uses the
-resulting UID for the vault. Attestations from `/x502-verify` are real
-on-chain EAS attestations under the same schema production uses.
+The `.env` must have funded keys. The runbook in
+`docs/runbook-base-sepolia.md` lists the prerequisites (LINK on Chainlink
+subscription, Base Sepolia ETH on the coordinator and verifier wallets,
+USDC on the deployer wallet).
 
 ## Production deploy
 

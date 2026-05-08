@@ -10,6 +10,8 @@ demo/.runtime/
 demo/scripts/skill-env.sh
 .playwright-cli/
 BRANCH-NOTES.md
+.ralph-status.md
+.claude/ralph-loop.local.md
 *.tsbuildinfo
 dist/
 build/
