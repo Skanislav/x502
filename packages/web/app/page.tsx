@@ -545,12 +545,12 @@ function ClaimForm({
         )}
       </button>
 
-      {pipeline.status !== "idle" && <PipelineStatus state={pipeline} />}
+      {pipeline.status !== "idle" && <PipelineStatus state={pipeline} threshold={verifierCount} />}
     </section>
   );
 }
 
-function PipelineStatus({ state }: { state: PipelineState }) {
+function PipelineStatus({ state, threshold }: { state: PipelineState; threshold: number }) {
   if (state.status === "paid" && state.txHash) {
     return (
       <div className="rounded-xl border border-success/40 bg-success/10 p-4 space-y-2 animate-fade-up">
@@ -585,11 +585,15 @@ function PipelineStatus({ state }: { state: PipelineState }) {
     );
   }
 
-  // Verifying — render the four-stage pipeline as a horizontal track.
+  // Verifying — render the four-stage pipeline as a horizontal track. The
+  // verifier-sigs denominator is the configured M-of-N threshold (defaults
+  // to 1 for the Base Sepolia single-attester demo) so the stage flips to
+  // "done" the moment the coordinator has enough attestations to settle.
+  const sigs = state.sigs ?? 0;
   const stages: Array<{ label: string; done: boolean }> = [
     { label: "Anti-spam fee", done: state.status !== "idle" },
     { label: "Chainlink fact", done: state.factReady === true },
-    { label: `Verifier sigs (${state.sigs ?? 0}/2)`, done: (state.sigs ?? 0) >= 2 },
+    { label: `Verifier sigs (${sigs}/${threshold})`, done: sigs >= threshold },
     { label: "Vault payout", done: state.status === "paid" },
   ];
 
