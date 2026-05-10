@@ -1,27 +1,44 @@
 {
-  "_comment": "Replace this fixture with a real recorded Base Sepolia run. Each entry is one bounty kind. After running the live Sepolia flow, capture the claimId, payout txHash, factHash, and verifier signatures from coordinator logs.",
+  "_comment": "Recorded Base Sepolia runs against the live EAS-flavor BountyVault. Each entry is one bounty kind. To add a new run, capture the claimId, payoutTx, factHash, and verifier signatures from the coordinator log + EAS attestation receipt.",
   "network": {
     "chainId": 84532,
     "label": "Base Sepolia",
     "explorer": "https://sepolia.basescan.org"
   },
-  "vault": "0x0000000000000000000000000000000000000000",
-  "factReceiver": "0x0000000000000000000000000000000000000000",
+  "vault": "0x951395a508ddF903e8F766960c93D94120F30877",
+  "factReceiver": "0x8e4f147B51F1013aFa72B9b84EAB67893890edE6",
   "runs": [
     {
       "kind": "report",
-      "repo": "skanislav/x502-sepolia-demo",
-      "externalId": "1",
-      "claimId": "0x0000000000000000000000000000000000000000000000000000000000000000",
-      "factHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
-      "payoutTx": "0x0000000000000000000000000000000000000000000000000000000000000000",
-      "claimant": "0x0000000000000000000000000000000000000000",
-      "claimantAmountUsdc": "4.80",
+      "repo": "skanislav/x502",
+      "externalId": "13",
+      "claimId": "0x18e06d3da5572f3a21167c4983ffd77b7f0e23a96e05c8e17c283ff00b861f06",
+      "factHash": "0xfdb18441e612a66fa82de11c60b1bcf1aa493f43c6d86c28c2f86224d3467152",
+      "payoutTx": "0xa58956704407c0bd33dda379229e4e1c96c46489703a024c120792ca9ddac433",
+      "claimant": "0x3EB5c6E32Db62E2e107f6572D23dC798cad7aAEa",
+      "claimantAmountUsdc": "0.049",
       "verifierSignatures": [
-        { "agentId": "101", "signature": "0x" },
-        { "agentId": "102", "signature": "0x" }
-      ],
-      "_status": "placeholder"
+        {
+          "agentId": "5260",
+          "signature": "0xdd2f701bcc3330d3449ea8e3506f322f1d7f5183ee5790c4b47222cc90d19a3c"
+        }
+      ]
+    },
+    {
+      "kind": "triage",
+      "repo": "skanislav/x502",
+      "externalId": "11",
+      "claimId": "0x91210205709cbf16a70beac202fe50db80a1a7b5e80137b5ec401d2e6c26d976",
+      "factHash": "0x3f9fec8821542c223479bc8afa58b1cd9b897533967e3edd6d5fec7d96c7ddef",
+      "payoutTx": "0x79235844c7dd84fc45036ab7e46aa978407dd368bb4f4b61bf62b8f6668bd613",
+      "claimant": "0x3EB5c6E32Db62E2e107f6572D23dC798cad7aAEa",
+      "claimantAmountUsdc": "0.019",
+      "verifierSignatures": [
+        {
+          "agentId": "5260",
+          "signature": "0xfa94ed9ddde4dda3d97c26089982177d9b178da518503e09b031d3be27bda686"
+        }
+      ]
     }
   ]
 }
