@@ -1,14 +1,15 @@
 "use client";
 
+import type { KindName } from "@x502/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { type Address, type Hex, isAddress } from "viem";
+
 import { DemoStepper, type StepKey, stepFromPipeline } from "@/components/DemoStepper";
 import { SepoliaReplay } from "@/components/SepoliaReplay";
 import { VerifierTheater } from "@/components/VerifierTheater";
 import { type PipelineState, mapPoll, previewCommitment } from "@/lib/claim-ui";
 import { CoordinatorClient } from "@/lib/coordinator";
 import { basescanTx, formatUsdc, shortHash } from "@/lib/format";
-import type { KindName } from "@x502/shared";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { type Address, type Hex, isAddress } from "viem";
 
 const DEFAULT_COORDINATOR = process.env.NEXT_PUBLIC_COORDINATOR_URL ?? "http://localhost:8787";
 
@@ -20,9 +21,6 @@ interface DemoConfig {
   contracts?: { eas?: string };
 }
 
-/// Attest.org explorer base URL per chain. Returns undefined when we don't
-/// recognize the chain (the verifier theater then renders the UID as
-/// plain text instead of a link).
 function easExplorer(chainId: number | undefined): string | undefined {
   if (chainId === 8453) return "https://base.easscan.org/attestation/view";
   if (chainId === 84532) return "https://base-sepolia.easscan.org/attestation/view";
@@ -55,8 +53,8 @@ const KIND_META: Record<KindName, { label: string; price: bigint; description: s
 const OUTCOME_FEE_PER_VERIFIER = 1_000n;
 /// Fallback verifier count for non-demo mode where we have no coordinator
 /// config to read from. The Base Sepolia demo configures one trusted
-/// attester (agent 5260, threshold 1); demo mode reads that count from
-/// /api/demo-config so the "you receive" amount stays accurate.
+/// attester (agent 5260, threshold 1); demo mode reads the actual count
+/// from /api/demo-config so the "you receive" amount stays accurate.
 const DEFAULT_VERIFIER_COUNT = 1;
 
 export default function Page() {
@@ -73,7 +71,6 @@ export default function Page() {
   const [pipeline, setPipeline] = useState<PipelineState>({ status: "idle" });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Demo-mode state — populated by /api/demo-config when ?mode=demo is set.
   const [demoMode, setDemoMode] = useState(false);
   const [demoCfg, setDemoCfg] = useState<DemoConfig | undefined>();
   useEffect(() => {
@@ -151,168 +148,15 @@ export default function Page() {
     }, 1500);
   }
 
-  const claimForm = (
-    <>
-      <section className="space-y-4">
-        <h2 className="text-xs uppercase tracking-widest text-muted">Coordinator</h2>
-        <input
-          type="text"
-          value={coordinatorUrl}
-          onChange={(e) => setCoordinatorUrl(e.target.value)}
-          className="w-full bg-paper/5 border border-paper/10 rounded px-3 py-2 text-sm focus:outline-none focus:border-accent"
-          placeholder="http://localhost:8787"
-        />
-      </section>
-
-      <section className="space-y-4">
-        <h2 className="text-xs uppercase tracking-widest text-muted">File a claim</h2>
-
-        <Field label="Repo (owner/name)">
-          <input value={repoSlug} onChange={(e) => setRepoSlug(e.target.value)} className="input" />
-        </Field>
-
-        <Field label="Issue or PR number">
-          <input
-            value={externalId}
-            onChange={(e) => setExternalId(e.target.value)}
-            inputMode="numeric"
-            className="input"
-          />
-        </Field>
-
-        <Field label="Bounty kind">
-          <div className="grid grid-cols-2 gap-2">
-            {(Object.keys(KIND_META) as KindName[]).map((k) => {
-              const m = KIND_META[k];
-              const selected = k === kind;
-              return (
-                <button
-                  type="button"
-                  key={k}
-                  onClick={() => setKind(k)}
-                  className={[
-                    "text-left rounded border px-3 py-2 transition",
-                    selected
-                      ? "border-accent bg-accent/10"
-                      : "border-paper/10 hover:border-paper/30",
-                  ].join(" ")}
-                >
-                  <div className="flex items-baseline justify-between">
-                    <span className="font-semibold">{m.label}</span>
-                    <span className="text-xs text-muted">{formatUsdc(m.price)}</span>
-                  </div>
-                  <div className="text-xs text-muted leading-5">{m.description}</div>
-                </button>
-              );
-            })}
-          </div>
-        </Field>
-
-        <Field label="Recipient (your wallet)">
-          <input
-            value={recipient}
-            onChange={(e) => setRecipient(e.target.value)}
-            placeholder="0x…"
-            className="input"
-          />
-        </Field>
-
-        <details className="text-sm" open={demoMode}>
-          <summary className="cursor-pointer text-muted">
-            Identity binding (commitment reveal)
-          </summary>
-          <div className="space-y-3 pt-3">
-            <Field label="Agent ID (ERC-8004 token id)">
-              <input
-                value={agentIdReveal}
-                onChange={(e) => setAgentIdReveal(e.target.value)}
-                inputMode="numeric"
-                className="input"
-              />
-            </Field>
-            <Field label="Salt (bytes32)">
-              <input
-                value={saltReveal}
-                onChange={(e) => setSaltReveal(e.target.value)}
-                className="input font-mono text-xs"
-              />
-            </Field>
-            <div className="text-xs text-muted">
-              Must match the
-              <code className="mx-1 px-1 bg-paper/5 rounded">
-                {"<!-- x502-commitment:0x... -->"}
-              </code>
-              line in the GH issue/PR body.
-            </div>
-            {commitmentPreview && (
-              <div className="text-xs font-mono break-all bg-paper/5 rounded p-2">
-                {commitmentPreview}
-              </div>
-            )}
-          </div>
-        </details>
-
-        <div className="rounded border border-paper/10 p-4 space-y-1 text-sm">
-          <div className="flex justify-between">
-            <span className="text-muted">Bounty</span>
-            <span>{formatUsdc(meta.price)}</span>
-          </div>
-          <div className="flex justify-between text-muted text-xs">
-            <span>
-              − verifier outcome fees ({verifierCount} × {formatUsdc(OUTCOME_FEE_PER_VERIFIER)})
-            </span>
-            <span>−{formatUsdc(OUTCOME_FEE_PER_VERIFIER * BigInt(verifierCount))}</span>
-          </div>
-          <hr className="border-paper/10 my-1" />
-          <div className="flex justify-between font-semibold">
-            <span>You receive</span>
-            <span className="text-accent">{formatUsdc(claimantAmount)}</span>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          onClick={submit}
-          disabled={pipeline.status === "verifying"}
-          className="w-full bg-accent text-paper rounded py-3 font-semibold disabled:opacity-50"
-        >
-          {pipeline.status === "verifying" ? "Verifying…" : "Submit claim"}
-        </button>
-      </section>
-
-      {pipeline.status !== "idle" && (
-        <section className="space-y-3">
-          <h2 className="text-xs uppercase tracking-widest text-muted">Status</h2>
-          <PipelineStatus state={pipeline} />
-        </section>
-      )}
-    </>
-  );
-
   return (
-    <main className={`mx-auto p-8 space-y-10 ${demoMode ? "max-w-7xl" : "max-w-3xl"}`}>
-      <header className="space-y-2">
-        <h1 className="text-3xl font-bold tracking-tight">
-          x502
-          <span className="text-muted text-base ml-3">
-            services pay agents for verifiable GitHub outcomes
-          </span>
-        </h1>
-        <p className="text-sm text-muted leading-6">
-          File a claim against a vault-funded repo. The coordinator routes the claim through
-          Chainlink Functions (objective fact) and N-of-M verifier agents (subjective judgment),
-          then settles to your wallet on Base.
-        </p>
-        {demoMode && (
-          <div className="text-xs text-accent">
-            demo mode {demoCfg ? `· coordinator ${demoCfg.coordinator.endpoint}` : ""}
-          </div>
-        )}
-      </header>
+    <main
+      className={`mx-auto px-6 sm:px-8 lg:px-10 pt-10 pb-20 space-y-12 ${demoMode ? "max-w-7xl" : "max-w-4xl"}`}
+    >
+      <Hero demoMode={demoMode} demoCfg={demoCfg} />
 
       {demoMode ? (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+          <div className="lg:col-span-5 space-y-6 animate-fade-up">
             <DemoStepper
               current={stepperStep}
               commitmentForm={{
@@ -325,8 +169,31 @@ export default function Page() {
               }}
             />
           </div>
-          <div className="space-y-6">{claimForm}</div>
-          <div className="space-y-6">
+          <div className="lg:col-span-7 space-y-6 animate-fade-up [animation-delay:80ms]">
+            <ClaimForm
+              coordinatorUrl={coordinatorUrl}
+              setCoordinatorUrl={setCoordinatorUrl}
+              repoSlug={repoSlug}
+              setRepoSlug={setRepoSlug}
+              externalId={externalId}
+              setExternalId={setExternalId}
+              kind={kind}
+              setKind={setKind}
+              recipient={recipient}
+              setRecipient={setRecipient}
+              agentIdReveal={agentIdReveal}
+              setAgentIdReveal={setAgentIdReveal}
+              saltReveal={saltReveal}
+              setSaltReveal={setSaltReveal}
+              commitmentPreview={commitmentPreview}
+              onSubmit={submit}
+              pipeline={pipeline}
+              meta={meta}
+              claimantAmount={claimantAmount}
+              verifierCount={verifierCount}
+              demoMode={demoMode}
+            />
+
             <VerifierTheater
               coordinatorUrl={coordinatorUrl}
               claimId={pipeline.claimId}
@@ -342,40 +209,434 @@ export default function Page() {
               }
               easExplorerBase={easExplorer(demoCfg?.chainId)}
             />
+
             <SepoliaReplay />
           </div>
         </div>
       ) : (
-        claimForm
+        <div className="space-y-8 animate-fade-up">
+          <ClaimForm
+            coordinatorUrl={coordinatorUrl}
+            setCoordinatorUrl={setCoordinatorUrl}
+            repoSlug={repoSlug}
+            setRepoSlug={setRepoSlug}
+            externalId={externalId}
+            setExternalId={setExternalId}
+            kind={kind}
+            setKind={setKind}
+            recipient={recipient}
+            setRecipient={setRecipient}
+            agentIdReveal={agentIdReveal}
+            setAgentIdReveal={setAgentIdReveal}
+            saltReveal={saltReveal}
+            setSaltReveal={setSaltReveal}
+            commitmentPreview={commitmentPreview}
+            onSubmit={submit}
+            pipeline={pipeline}
+            meta={meta}
+            claimantAmount={claimantAmount}
+            verifierCount={verifierCount}
+            demoMode={demoMode}
+          />
+        </div>
       )}
 
-      <footer className="text-xs text-muted pt-4 border-t border-paper/10 space-y-1">
-        <div>
-          x402 = agents pay services. x502 = services pay agents. This is the inverse: the vault
-          pays out for verified outcomes, and verifier compute is x402-paid by the coordinator from
-          the anti-spam-fee budget.
-        </div>
-        <div>
-          Sources: Base Sepolia (chainId 84532) + ERC-8004 IdentityRegistry 0x8004A8… + Chainlink
-          Functions Router 0xf9B8fc…
-        </div>
-      </footer>
-
-      <style jsx>{`
-        .input {
-          width: 100%;
-          background: rgba(250, 250, 246, 0.05);
-          border: 1px solid rgba(250, 250, 246, 0.1);
-          border-radius: 0.25rem;
-          padding: 0.5rem 0.75rem;
-          font-size: 0.875rem;
-        }
-        .input:focus {
-          outline: none;
-          border-color: #0052ff;
-        }
-      `}</style>
+      <Footer />
     </main>
+  );
+}
+
+function Hero({
+  demoMode,
+  demoCfg,
+}: {
+  demoMode: boolean;
+  demoCfg: DemoConfig | undefined;
+}) {
+  return (
+    <header className="space-y-6 animate-fade-up">
+      <div className="flex flex-wrap items-center gap-3">
+        {demoMode ? (
+          <span className="x502-pill-success">
+            <span className="relative inline-flex h-1.5 w-1.5">
+              <span className="absolute inset-0 rounded-full bg-success animate-ping opacity-60" />
+              <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-success" />
+            </span>
+            Live · Base Sepolia
+          </span>
+        ) : (
+          <span className="x502-pill-accent">protocol preview</span>
+        )}
+        <span className="x502-pill">chain 84532</span>
+        <span className="x502-pill">M-of-N · EAS</span>
+      </div>
+      <div className="space-y-4 max-w-3xl">
+        <h1 className="font-mono text-5xl sm:text-6xl font-medium tracking-tightest text-text-strong">
+          x502
+          <span className="ml-3 inline-block h-2 w-2 translate-y-[-0.45em] rounded-full bg-accent shadow-glow" />
+        </h1>
+        <p className="font-sans text-xl sm:text-2xl text-text-strong leading-snug tracking-tight">
+          Services pay agents for <span className="text-accent">verifiable GitHub outcomes.</span>
+        </p>
+        <p className="text-text-muted text-base leading-relaxed">
+          A repo owner funds a USDC vault. A claimant submits an issue or PR. Chainlink Functions
+          stamps the GitHub fact on-chain. Verifier agents publish EAS attestations. The vault
+          settles on Base — no custodian, no oracle of last resort.
+        </p>
+      </div>
+      {demoMode && demoCfg && (
+        <div className="x502-card-tight max-w-3xl flex flex-wrap gap-x-8 gap-y-3 text-sm">
+          <Kv label="coordinator" value={demoCfg.coordinator.endpoint} mono />
+          <Kv label="repo" value={demoCfg.repo.slug} mono />
+          <Kv
+            label="verifiers"
+            value={`${demoCfg.verifiers.length} trusted (agent ${demoCfg.verifiers[0]?.agentId ?? "?"})`}
+          />
+        </div>
+      )}
+    </header>
+  );
+}
+
+function Kv({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="x502-eyebrow">{label}</div>
+      <div className={mono ? "font-mono text-[13px] text-text-strong" : "text-text-strong"}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function ClaimForm({
+  coordinatorUrl,
+  setCoordinatorUrl,
+  repoSlug,
+  setRepoSlug,
+  externalId,
+  setExternalId,
+  kind,
+  setKind,
+  recipient,
+  setRecipient,
+  agentIdReveal,
+  setAgentIdReveal,
+  saltReveal,
+  setSaltReveal,
+  commitmentPreview,
+  onSubmit,
+  pipeline,
+  meta,
+  claimantAmount,
+  verifierCount,
+  demoMode,
+}: {
+  coordinatorUrl: string;
+  setCoordinatorUrl: (v: string) => void;
+  repoSlug: string;
+  setRepoSlug: (v: string) => void;
+  externalId: string;
+  setExternalId: (v: string) => void;
+  kind: KindName;
+  setKind: (k: KindName) => void;
+  recipient: string;
+  setRecipient: (v: string) => void;
+  agentIdReveal: string;
+  setAgentIdReveal: (v: string) => void;
+  saltReveal: string;
+  setSaltReveal: (v: string) => void;
+  commitmentPreview: `0x${string}` | undefined;
+  onSubmit: () => Promise<void>;
+  pipeline: PipelineState;
+  meta: { label: string; price: bigint; description: string };
+  claimantAmount: bigint;
+  verifierCount: number;
+  demoMode: boolean;
+}) {
+  const [bindingOpen, setBindingOpen] = useState(demoMode);
+  return (
+    <section className="x502-card p-6 sm:p-7 space-y-6">
+      <div className="flex items-end justify-between gap-3">
+        <div className="space-y-1">
+          <h2 className="x502-eyebrow">File a claim</h2>
+          <p className="text-text-muted text-sm">
+            POST to the coordinator. The pipeline runs from here.
+          </p>
+        </div>
+        <PipelinePill state={pipeline} />
+      </div>
+
+      <Field label="Coordinator">
+        <input
+          type="text"
+          value={coordinatorUrl}
+          onChange={(e) => setCoordinatorUrl(e.target.value)}
+          className="x502-input"
+          placeholder="http://localhost:8787"
+        />
+      </Field>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Repo (owner / name)">
+          <input
+            value={repoSlug}
+            onChange={(e) => setRepoSlug(e.target.value)}
+            className="x502-input"
+            placeholder="acme/widgets"
+          />
+        </Field>
+        <Field label="Issue or PR number">
+          <input
+            value={externalId}
+            onChange={(e) => setExternalId(e.target.value)}
+            inputMode="numeric"
+            className="x502-input"
+            placeholder="123"
+          />
+        </Field>
+      </div>
+
+      <div className="space-y-2.5">
+        <span className="x502-eyebrow">Bounty kind</span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          {(Object.keys(KIND_META) as KindName[]).map((k) => {
+            const m = KIND_META[k];
+            const selected = k === kind;
+            return (
+              <button
+                type="button"
+                key={k}
+                onClick={() => setKind(k)}
+                className={[
+                  "group text-left rounded-xl border p-3.5 transition-all duration-150",
+                  selected
+                    ? "border-accent bg-accent/10 shadow-glow"
+                    : "border-line bg-ink-700/60 hover:border-line-strong hover:bg-ink-600/60",
+                ].join(" ")}
+              >
+                <div className="flex items-baseline justify-between gap-3">
+                  <span
+                    className={[
+                      "font-mono text-base",
+                      selected ? "text-text-strong" : "text-text-strong",
+                    ].join(" ")}
+                  >
+                    {m.label}
+                  </span>
+                  <span
+                    className={[
+                      "font-mono text-sm tabular-nums",
+                      selected ? "text-accent" : "text-text-muted",
+                    ].join(" ")}
+                  >
+                    {formatUsdc(m.price)}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs leading-snug text-text-muted">{m.description}</p>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <Field label="Recipient (your wallet)">
+        <input
+          value={recipient}
+          onChange={(e) => setRecipient(e.target.value)}
+          placeholder="0x…"
+          className="x502-input-mono"
+          spellCheck={false}
+        />
+      </Field>
+
+      <div className="x502-card-tight border-line/80 bg-ink-700/50 space-y-3">
+        <button
+          type="button"
+          onClick={() => setBindingOpen((v) => !v)}
+          aria-expanded={bindingOpen}
+          className="w-full flex items-center justify-between gap-2 text-left"
+        >
+          <span className="space-y-0.5">
+            <span className="block x502-eyebrow">Identity binding · commitment reveal</span>
+            <span className="block text-xs text-text-muted">
+              Pre-image of the <code className="font-mono">x502-commitment</code> marker on GitHub.
+            </span>
+          </span>
+          <Chevron open={bindingOpen} />
+        </button>
+        {bindingOpen && (
+          <div className="space-y-3 pt-2 animate-fade-up">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Agent ID (ERC-8004 token id)">
+                <input
+                  value={agentIdReveal}
+                  onChange={(e) => setAgentIdReveal(e.target.value)}
+                  inputMode="numeric"
+                  className="x502-input"
+                />
+              </Field>
+              <Field label="Salt (bytes32)">
+                <input
+                  value={saltReveal}
+                  onChange={(e) => setSaltReveal(e.target.value)}
+                  className="x502-input-mono"
+                  spellCheck={false}
+                />
+              </Field>
+            </div>
+            {commitmentPreview && (
+              <div className="rounded-lg border border-line bg-ink-800/80 p-3 space-y-1.5">
+                <div className="x502-eyebrow">commitment</div>
+                <code className="block font-mono text-[12.5px] leading-relaxed text-text-strong break-all">
+                  {commitmentPreview}
+                </code>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-xl border border-line bg-ink-700/40 p-4 space-y-1.5 text-sm">
+        <div className="flex justify-between">
+          <span className="text-text-muted">Bounty</span>
+          <span className="font-mono tabular-nums text-text-strong">{formatUsdc(meta.price)}</span>
+        </div>
+        <div className="flex justify-between text-text-muted text-xs">
+          <span>
+            verifier outcome fees ({verifierCount} × {formatUsdc(OUTCOME_FEE_PER_VERIFIER)})
+          </span>
+          <span className="font-mono tabular-nums">
+            −{formatUsdc(OUTCOME_FEE_PER_VERIFIER * BigInt(verifierCount))}
+          </span>
+        </div>
+        <div className="border-t border-line my-1.5" />
+        <div className="flex justify-between font-medium">
+          <span>You receive</span>
+          <span className="font-mono tabular-nums text-accent">{formatUsdc(claimantAmount)}</span>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onSubmit}
+        disabled={pipeline.status === "verifying"}
+        className="x502-button w-full"
+      >
+        {pipeline.status === "verifying" ? (
+          <>
+            <Spinner /> Verifying…
+          </>
+        ) : (
+          <>
+            Submit claim
+            <span aria-hidden className="text-white/60">
+              →
+            </span>
+          </>
+        )}
+      </button>
+
+      {pipeline.status !== "idle" && <PipelineStatus state={pipeline} threshold={verifierCount} />}
+    </section>
+  );
+}
+
+function PipelineStatus({ state, threshold }: { state: PipelineState; threshold: number }) {
+  if (state.status === "paid" && state.txHash) {
+    return (
+      <div className="rounded-xl border border-success/40 bg-success/10 p-4 space-y-2 animate-fade-up">
+        <div className="flex justify-between items-baseline">
+          <span className="font-medium text-success flex items-center gap-2">
+            <CheckIcon /> Paid
+          </span>
+          {state.claimId && (
+            <span className="x502-mono text-text-muted">claim {shortHash(state.claimId)}</span>
+          )}
+        </div>
+        <a
+          href={basescanTx(state.txHash)}
+          target="_blank"
+          rel="noreferrer"
+          className="block x502-mono text-success break-all hover:underline"
+        >
+          {state.txHash}
+        </a>
+      </div>
+    );
+  }
+
+  if (state.status === "failed") {
+    return (
+      <div className="rounded-xl border border-danger/40 bg-danger/10 p-4 text-sm space-y-1 animate-fade-up">
+        <div className="font-medium text-danger flex items-center gap-2">
+          <XIcon /> Failed
+        </div>
+        <div className="text-xs text-text-muted whitespace-pre-wrap break-words">{state.error}</div>
+      </div>
+    );
+  }
+
+  // Verifying — render the four-stage pipeline as a horizontal track. The
+  // verifier-sigs denominator is the configured M-of-N threshold (defaults
+  // to 1 for the Base Sepolia single-attester demo) so the stage flips to
+  // "done" the moment the coordinator has enough attestations to settle.
+  const sigs = state.sigs ?? 0;
+  const stages: Array<{ label: string; done: boolean }> = [
+    { label: "Anti-spam fee", done: state.status !== "idle" },
+    { label: "Chainlink fact", done: state.factReady === true },
+    { label: `Verifier sigs (${sigs}/${threshold})`, done: sigs >= threshold },
+    { label: "Vault payout", done: state.status === "paid" },
+  ];
+
+  return (
+    <div className="rounded-xl border border-line bg-ink-700/40 p-4 space-y-3 animate-fade-up">
+      <div className="x502-eyebrow">Pipeline</div>
+      <ol className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {stages.map((s, i) => (
+          <li
+            key={s.label}
+            className={[
+              "flex items-center gap-2 rounded-lg px-3 py-2 text-xs transition-colors",
+              s.done
+                ? "border border-accent/40 bg-accent/10 text-text-strong"
+                : "border border-line bg-ink-800/60 text-text-muted",
+            ].join(" ")}
+          >
+            <span
+              className={[
+                "h-2 w-2 rounded-full shrink-0",
+                s.done
+                  ? "bg-accent"
+                  : i === stages.findIndex((x) => !x.done)
+                    ? "bg-accent/70 animate-pulse-ring"
+                    : "bg-text-faint",
+              ].join(" ")}
+            />
+            <span>{s.label}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function PipelinePill({ state }: { state: PipelineState }) {
+  if (state.status === "idle") return <span className="x502-pill">idle</span>;
+  if (state.status === "paid") return <span className="x502-pill-success">paid</span>;
+  if (state.status === "failed") return <span className="x502-pill-danger">failed</span>;
+  return (
+    <span className="x502-pill-accent">
+      <Spinner small /> verifying
+    </span>
   );
 }
 
@@ -387,62 +648,106 @@ function Field({
   children: React.ReactNode;
 }) {
   return (
-    // biome-ignore lint/a11y/noLabelWithoutControl: child inputs are nested inside this label.
-    <label className="block space-y-1">
-      <span className="text-xs text-muted">{label}</span>
+    // biome-ignore lint/a11y/noLabelWithoutControl: child input is rendered inside this label.
+    <label className="block space-y-1.5">
+      <span className="x502-eyebrow">{label}</span>
       {children}
     </label>
   );
 }
 
-function PipelineStatus({ state }: { state: PipelineState }) {
-  if (state.status === "paid" && state.txHash) {
-    return (
-      <div className="rounded border border-accent/40 bg-accent/5 p-4 space-y-2">
-        <div className="flex justify-between items-baseline">
-          <span className="font-semibold text-accent">Paid</span>
-          <span className="text-xs text-muted">{shortHash(state.claimId!)}</span>
-        </div>
-        <a
-          href={basescanTx(state.txHash)}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-accent underline break-all"
-        >
-          {state.txHash}
-        </a>
-      </div>
-    );
-  }
-
-  if (state.status === "failed") {
-    return (
-      <div className="rounded border border-red-500/40 bg-red-500/5 p-4 text-sm space-y-1">
-        <div className="font-semibold text-red-400">Failed</div>
-        <div className="text-xs text-muted">{state.error}</div>
-      </div>
-    );
-  }
-
+function Chevron({ open }: { open: boolean }) {
   return (
-    <div className="rounded border border-paper/10 p-4 space-y-2 text-sm">
-      <Step label="Anti-spam fee paid" done={state.status !== "idle"} />
-      <Step label="Chainlink Functions fact delivered" done={state.factReady === true} />
-      <Step label={`Verifier signatures (${state.sigs ?? 0} / 2)`} done={(state.sigs ?? 0) >= 2} />
-      <Step label="Vault payout tx" done={state.status === "paid"} />
-    </div>
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={`transition-transform duration-150 text-text-muted ${open ? "rotate-180" : ""}`}
+      role="img"
+      aria-label={open ? "collapse" : "expand"}
+    >
+      <title>{open ? "collapse" : "expand"}</title>
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
   );
 }
 
-function Step({ label, done }: { label: string; done: boolean }) {
+function CheckIcon() {
   return (
-    <div className="flex items-center gap-2">
-      <span
-        className={["h-3 w-3 rounded-full", done ? "bg-accent" : "bg-paper/20 animate-pulse"].join(
-          " ",
-        )}
-      />
-      <span className={done ? "text-paper" : "text-muted"}>{label}</span>
-    </div>
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="img"
+      aria-label="checkmark"
+    >
+      <title>checkmark</title>
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function XIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      role="img"
+      aria-label="error"
+    >
+      <title>error</title>
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
+    </svg>
+  );
+}
+
+function Spinner({ small = false }: { small?: boolean }) {
+  const size = small ? "h-3 w-3" : "h-4 w-4";
+  return (
+    <svg
+      className={`${size} animate-spin`}
+      viewBox="0 0 24 24"
+      fill="none"
+      role="img"
+      aria-label="loading"
+    >
+      <title>loading</title>
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="border-t border-line pt-6 space-y-2 text-text-muted text-sm">
+      <p>
+        x402 = agents pay services. <span className="text-text-strong">x502</span> = services pay
+        agents. The vault settles for verified outcomes; verifier compute is x402-paid by the
+        coordinator from the anti-spam-fee budget.
+      </p>
+      <p className="text-xs">
+        Sources: Base Sepolia (chainId 84532) · ERC-8004 IdentityRegistry{" "}
+        <code className="x502-mono text-text-strong">0x8004A8…</code> · Chainlink Functions Router{" "}
+        <code className="x502-mono text-text-strong">0xf9B8fc…</code>.
+      </p>
+    </footer>
   );
 }

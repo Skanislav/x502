@@ -37,11 +37,7 @@ export function VerifierTheater({
 }: {
   coordinatorUrl: string;
   claimId: string | undefined;
-  /// (agentId, address) pairs from the demo runtime — used to map an
-  /// observed attester back to the verifier identity for display.
   agents: AgentSpec[];
-  /// Optional. Base URL for an attestation explorer (e.g. attest.org). When
-  /// set, each attested column links to `${easExplorerBase}/${uid}`.
   easExplorerBase?: string;
 }) {
   const [deltas, setDeltas] = useState<Record<string, AttestationDelta>>({});
@@ -50,6 +46,9 @@ export function VerifierTheater({
 
   useEffect(() => {
     if (!claimId) return;
+    setDeltas({});
+    setFact({});
+    setPayoutTx(undefined);
     const sub = subscribeDemoEvents(`${coordinatorUrl}/events`, {
       claimId,
       onEvent: (event) => {
@@ -73,54 +72,105 @@ export function VerifierTheater({
   }, [coordinatorUrl, claimId]);
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-xs uppercase tracking-widest text-muted">Verifier theater</h2>
-      <p className="text-[11px] text-muted leading-snug">
-        Each verifier identity runs the <code>x502-verify</code> skill in their own Claude. Their
-        EAS attestations land here as the coordinator observes them on chain.
-      </p>
-
-      <div className="rounded border border-paper/10 p-3 text-xs space-y-1">
-        <div className="flex justify-between">
-          <span className="text-muted">DON fact</span>
-          <span>
-            {fact.status === undefined ? (
-              <span className="text-muted">awaiting…</span>
-            ) : fact.status === 1 ? (
-              <span className="text-accent">accepted (status=1)</span>
-            ) : (
-              <span className="text-red-400">rejected (status={fact.status})</span>
-            )}
-          </span>
-        </div>
-        {fact.mergedBlock && fact.mergedBlock !== "0" && (
-          <div className="flex justify-between text-muted">
-            <span>mergedBlock</span>
-            <span className="font-mono">{fact.mergedBlock}</span>
-          </div>
-        )}
-        {fact.ghAuthorBinding && (
-          <div className="flex justify-between text-muted">
-            <span>ghAuthorBinding</span>
-            <span className="font-mono">{shortHash(fact.ghAuthorBinding as `0x${string}`)}</span>
-          </div>
-        )}
+    <section className="x502-card p-6 sm:p-7 space-y-5">
+      <div className="space-y-1">
+        <h2 className="x502-eyebrow">Verifier theater</h2>
+        <p className="text-text-muted text-sm leading-relaxed">
+          Each verifier identity runs the <code className="x502-mono">x502-verify</code> skill in
+          their own Claude. EAS attestations land here as the coordinator observes them on chain.
+        </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <FactBlock fact={fact} />
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {agentSpecs.map((s) => {
           const agent = agentColumnFromSpec(s, deltas);
-          return <AgentColumnCard key={s.agentId} agent={agent} explorer={easExplorerBase} />;
+          return <AgentCard key={s.agentId} agent={agent} explorer={easExplorerBase} />;
         })}
       </div>
 
       {payoutTx && (
-        <div className="rounded border border-accent/40 bg-accent/5 p-3 text-xs">
-          <span className="text-muted">payout tx </span>
-          <span className="font-mono break-all">{payoutTx}</span>
+        <div className="rounded-xl border border-success/40 bg-success/10 p-4 space-y-1.5 animate-fade-up">
+          <div className="flex items-center justify-between">
+            <span className="text-success font-medium text-sm">Payout settled</span>
+            <span className="x502-pill-success">on chain</span>
+          </div>
+          <a
+            href={`https://sepolia.basescan.org/tx/${payoutTx}`}
+            target="_blank"
+            rel="noreferrer"
+            className="block x502-mono text-success break-all hover:underline"
+          >
+            {payoutTx}
+          </a>
         </div>
       )}
     </section>
+  );
+}
+
+function FactBlock({ fact }: { fact: FactState }) {
+  const empty = fact.status === undefined;
+  return (
+    <div
+      className={[
+        "rounded-xl border p-4 space-y-2.5 transition-colors",
+        empty ? "border-line bg-ink-700/40" : "border-line-strong bg-ink-700/60",
+      ].join(" ")}
+    >
+      <div className="flex items-baseline justify-between">
+        <span className="x502-eyebrow">DON fact</span>
+        <FactBadge fact={fact} />
+      </div>
+      {!empty && fact.mergedBlock && fact.mergedBlock !== "0" && (
+        <Row label="mergedBlock" value={fact.mergedBlock} mono />
+      )}
+      {!empty && fact.ghAuthorBinding && (
+        <Row
+          label="ghAuthorBinding"
+          value={shortHash(fact.ghAuthorBinding as `0x${string}`)}
+          mono
+        />
+      )}
+      {empty && (
+        <p className="text-xs text-text-muted">
+          Awaiting Chainlink Functions response — usually 30–60s on Base Sepolia.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FactBadge({ fact }: { fact: FactState }) {
+  if (fact.status === undefined) {
+    return (
+      <span className="x502-pill">
+        <span className="h-1.5 w-1.5 rounded-full bg-text-faint animate-pulse" />
+        awaiting
+      </span>
+    );
+  }
+  if (fact.status === 1) {
+    return <span className="x502-pill-success">accepted · status 1</span>;
+  }
+  return <span className="x502-pill-danger">rejected · status {fact.status}</span>;
+}
+
+function Row({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex justify-between text-sm">
+      <span className="text-text-muted">{label}</span>
+      <span className={mono ? "x502-mono text-text-strong" : "text-text-strong"}>{value}</span>
+    </div>
   );
 }
 
@@ -137,42 +187,55 @@ export function agentColumnFromSpec(
   };
 }
 
-function AgentColumnCard({
+function AgentCard({
   agent,
   explorer,
 }: {
   agent: AgentColumn;
   explorer?: string;
 }) {
-  const className =
-    agent.status === "attested" ? "border-accent/60 bg-accent/5" : "border-paper/10 animate-pulse";
+  const attested = agent.status === "attested";
   return (
-    <div className={`rounded border ${className} p-3 text-xs space-y-2`}>
-      <div className="flex justify-between items-baseline">
-        <span className="font-semibold">agent {agent.agentId}</span>
-        <span className={agent.status === "attested" ? "text-accent" : "text-muted"}>
-          {agent.status === "attested" ? "✓ attested" : "waiting…"}
+    <article
+      className={[
+        "rounded-xl border p-4 transition-all duration-200 space-y-2.5",
+        attested
+          ? "border-accent/50 bg-accent/10 shadow-glow animate-fade-up"
+          : "border-line bg-ink-700/40",
+      ].join(" ")}
+    >
+      <div className="flex items-baseline justify-between">
+        <span className="font-medium text-text-strong">
+          agent <span className="font-mono">{agent.agentId}</span>
         </span>
+        {attested ? (
+          <span className="x502-pill-accent">attested</span>
+        ) : (
+          <span className="x502-pill">
+            <span className="h-1.5 w-1.5 rounded-full bg-text-faint animate-pulse" />
+            waiting
+          </span>
+        )}
       </div>
-      <p className="text-[10px] font-mono break-all text-muted">
+      <p className="x502-mono text-text-muted">
         {shortHash(agent.attesterAddress as `0x${string}`)}
       </p>
       {agent.uid && (
-        <p className="text-[10px] font-mono break-all">
+        <p className="x502-mono break-all">
           {explorer ? (
             <a
               href={`${explorer.replace(/\/$/, "")}/${agent.uid}`}
               target="_blank"
               rel="noreferrer"
-              className="text-accent underline"
+              className="x502-link"
             >
-              uid {shortHash(agent.uid as `0x${string}`)}
+              uid {shortHash(agent.uid as `0x${string}`)} ↗
             </a>
           ) : (
-            <span className="text-muted">uid {shortHash(agent.uid as `0x${string}`)}</span>
+            <span className="text-text-muted">uid {shortHash(agent.uid as `0x${string}`)}</span>
           )}
         </p>
       )}
-    </div>
+    </article>
   );
 }

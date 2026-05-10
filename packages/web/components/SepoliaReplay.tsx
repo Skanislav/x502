@@ -39,28 +39,77 @@ export function SepoliaReplay() {
       .catch(() => setError("fixture unavailable"));
   }, []);
 
-  if (error) return <p className="text-xs text-muted">No Sepolia fixture present yet.</p>;
-  if (!data) return <p className="text-xs text-muted">Loading…</p>;
+  if (error) {
+    return (
+      <section className="x502-card p-6 space-y-2">
+        <h2 className="x502-eyebrow">Sepolia proof</h2>
+        <p className="text-text-muted text-sm">No Sepolia fixture present yet.</p>
+      </section>
+    );
+  }
+  if (!data) {
+    return (
+      <section className="x502-card p-6 space-y-2">
+        <h2 className="x502-eyebrow">Sepolia proof</h2>
+        <p className="text-text-muted text-sm">Loading…</p>
+      </section>
+    );
+  }
+
+  // We deliberately don't render placeholder rows in the live UI — they
+  // are scaffolding for ops to fill in and would otherwise lie about
+  // having a real on-chain proof.
+  const liveRuns = data.runs.filter((r) => r._status !== "placeholder");
+  const vaultZero = /^0x0+$/i.test(data.vault);
+  const factZero = /^0x0+$/i.test(data.factReceiver);
+  const hasLive = liveRuns.length > 0 && !vaultZero && !factZero;
+
+  if (!hasLive) {
+    return (
+      <section className="x502-card p-6 sm:p-7 space-y-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="x502-eyebrow">
+            Sepolia proof · {data.network.label} ({data.network.chainId})
+          </h2>
+          <span className="x502-pill">no live runs yet</span>
+        </div>
+        <p className="text-text-muted text-sm leading-relaxed">
+          No recorded payout in{" "}
+          <code className="x502-mono">demo/scripts/sepolia-replay.fixture.json</code> yet. Run a
+          claim through the coordinator and capture the claimId, factHash, attestation UID, and
+          payout tx into the fixture to populate this card.
+        </p>
+      </section>
+    );
+  }
 
   return (
-    <section className="space-y-4">
-      <h2 className="text-xs uppercase tracking-widest text-muted">
-        Sepolia proof · {data.network.label} ({data.network.chainId})
-      </h2>
-      <div className="text-xs space-y-1">
-        <div className="flex justify-between text-muted">
-          <span>Vault</span>
-          <span className="font-mono">{shortHash(data.vault)}</span>
-        </div>
-        <div className="flex justify-between text-muted">
-          <span>Fact receiver</span>
-          <span className="font-mono">{shortHash(data.factReceiver)}</span>
-        </div>
+    <section className="x502-card p-6 sm:p-7 space-y-5">
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="x502-eyebrow">
+          Sepolia proof · {data.network.label} ({data.network.chainId})
+        </h2>
+        <span className="x502-pill-success">on chain · {liveRuns.length}</span>
       </div>
-      {data.runs.map((r) => (
-        <ReplayRunCard key={r.claimId} run={r} explorer={data.network.explorer} />
-      ))}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Tile label="Vault" value={shortHash(data.vault)} />
+        <Tile label="Fact receiver" value={shortHash(data.factReceiver)} />
+      </div>
+      <div className="space-y-3">
+        {liveRuns.map((r) => (
+          <ReplayRunCard key={r.claimId} run={r} explorer={data.network.explorer} />
+        ))}
+      </div>
     </section>
+  );
+}
+
+function Tile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-line bg-ink-700/40 p-3.5 space-y-1">
+      <div className="x502-eyebrow">{label}</div>
+      <div className="x502-mono text-text-strong">{value}</div>
+    </div>
   );
 }
 
@@ -70,45 +119,56 @@ function ReplayRunCard({ run, explorer }: { run: ReplayRun; explorer: string }) 
   return (
     <div
       className={[
-        "rounded border p-3 text-xs space-y-2",
-        isPlaceholder ? "border-paper/10 opacity-60" : "border-accent/40 bg-accent/5",
+        "rounded-xl border p-4 space-y-2.5",
+        isPlaceholder ? "border-line bg-ink-700/30 opacity-70" : "border-accent/40 bg-accent/5",
       ].join(" ")}
     >
-      <div className="flex justify-between items-baseline">
-        <span className="font-semibold">
-          {run.kind} · {run.repo} #{run.externalId}
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="font-medium text-text-strong">
+          <span className="font-mono">{run.kind}</span>
+          <span className="text-text-muted"> · {run.repo} </span>
+          <span className="font-mono">#{run.externalId}</span>
         </span>
-        {isPlaceholder && <span className="text-[10px] text-muted">placeholder</span>}
+        {isPlaceholder ? (
+          <span className="x502-pill">placeholder</span>
+        ) : (
+          <span className="x502-pill-success">paid · {run.claimantAmountUsdc} USDC</span>
+        )}
       </div>
-      <div className="flex justify-between text-muted">
-        <span>claimId</span>
-        <span className="font-mono">{shortHash(run.claimId)}</span>
+      <div className="grid grid-cols-2 gap-3">
+        <Row label="claimId" value={shortHash(run.claimId)} mono />
+        <Row label="factHash" value={shortHash(run.factHash)} mono />
       </div>
-      <div className="flex justify-between text-muted">
-        <span>factHash</span>
-        <span className="font-mono">{shortHash(run.factHash)}</span>
-      </div>
-      <div className="flex justify-between">
-        <span className="text-muted">paid</span>
-        <span className="text-accent">{run.claimantAmountUsdc} USDC</span>
-      </div>
-      <div className="flex justify-between text-muted">
-        <span>signers</span>
-        <span>{run.verifierSignatures.map((s) => `#${s.agentId}`).join(" · ")}</span>
-      </div>
+      <Row label="signers" value={run.verifierSignatures.map((s) => `#${s.agentId}`).join(" · ")} />
       {txUrl && (
         <a
           href={txUrl}
           target="_blank"
           rel="noreferrer"
-          className="text-xs text-accent underline break-all"
+          className="block x502-mono x502-link break-all"
         >
-          {run.payoutTx}
+          {run.payoutTx} ↗
         </a>
       )}
     </div>
   );
 }
 
-// re-export so a parent can render it within an existing layout helper.
-export { formatUsdc };
+function Row({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex justify-between text-sm">
+      <span className="text-text-muted">{label}</span>
+      <span className={mono ? "x502-mono text-text-strong" : "text-text-strong"}>{value}</span>
+    </div>
+  );
+}
+
+export { formatUsdc, basescanTx };
