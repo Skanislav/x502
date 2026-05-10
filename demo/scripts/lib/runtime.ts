@@ -8,15 +8,17 @@ import type { Address, Hex } from "viem";
 export interface DemoRuntime {
   rpcUrl: string;
   chainId: number;
-  /// Anvil prefunded key (deployer + repo owner).
-  deployerKey: Hex;
+  /// Optional. Only set when running against a chain the demo itself
+  /// provisions (legacy local mode). For Base Sepolia this is undefined —
+  /// each on-chain action signs with its own dedicated key from .env
+  /// (PRIVATE_KEY, COORDINATOR_PRIVATE_KEY, VERIFIER_PRIVATE_KEY).
+  deployerKey?: Hex;
   contracts: {
     usdc: Address;
     registry: Address;
     factProvider: Address;
     vault: Address;
-    /// EAS contract — MockEAS in plain anvil mode, the real predeploy
-    /// (0x4200…0021) when anvil is forking Base Sepolia.
+    /// Real EAS predeploy at 0x4200…0021 on Base Sepolia.
     eas: Address;
   };
   /// Schema UID under which verifiers attest. The vault rejects attestations

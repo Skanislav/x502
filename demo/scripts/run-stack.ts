@@ -1,26 +1,27 @@
-/// Boots the local x502 demo stack:
-///   anvil → deploy/seed → coordinator → auto-fulfill → web
+/// Boots the live x502 demo stack against Base Sepolia (chain `84532`):
+///   load .env → seed addresses.json → coordinator → web
 ///
-/// In the new skill-driven architecture there are no verifier-agent
-/// processes. Each verifier identity is run by a human via the
-/// `x502-verify` Claude skill (`.claude/skills/x502-verify/SKILL.md`).
-/// addresses.json carries the per-verifier signing keys + scope ids;
-/// when the operator invokes the skill the keys are loaded into env and
-/// the helper at `demo/scripts/x502.ts` does the signing + push.
+/// No anvil. No local DON simulator. The demo speaks to the real Base
+/// Sepolia BountyVault, GitHubFactReceiver (Chainlink Functions consumer),
+/// EAS, and SchemaRegistry. addresses.json carries the verifier signing
+/// key from VERIFIER_PRIVATE_KEY; the operator runs `/x502-verify as agent
+/// <id>` from a separate Claude Code shell after `source demo/scripts/skill-env.sh`.
 ///
 /// Logs from each subprocess are tee'd to stdout (prefixed) and to
 /// demo/.runtime/logs/<name>.log. Ctrl-C tears everything down.
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { createWriteStream, mkdirSync, openSync, writeFileSync } from "node:fs";
+import { chmodSync, createWriteStream, mkdirSync, openSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { startAnvil } from "./lib/anvil.js";
+import { loadDotEnv } from "./lib/load-env.js";
 import { RUNTIME_DIR, ensureRuntimeDir, readRuntime } from "./lib/runtime.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
+
+loadDotEnv(REPO_ROOT);
 
 const COORDINATOR_PORT = Number(process.env.COORDINATOR_PORT ?? "8787");
 const WEB_PORT = Number(process.env.WEB_PORT ?? "3000");
@@ -99,62 +100,36 @@ async function main() {
   process.on("SIGINT", cleanup);
   process.on("SIGTERM", cleanup);
 
-  // 1) anvil. When BASE_SEPOLIA_RPC_URL is set, run as a fork — real EAS +
-  // SchemaRegistry predeploys are reachable so the demo exercises the same
-  // EAS contracts production uses.
-  const forkUrl = process.env.BASE_SEPOLIA_RPC_URL;
-  process.stdout.write(
-    `[run-stack] starting anvil on :8545${forkUrl ? ` (fork=${truncate(forkUrl)})` : ""}\n`,
-  );
-  const anvil = await startAnvil({
-    port: 8545,
-    logFile: resolve(RUNTIME_DIR, "logs", "anvil.log"),
-    forkUrl,
-  });
-  procs.push({ name: "anvil", child: anvil.child });
-  if (anvil.child.stdout) {
-    const out = createWriteStream(resolve(RUNTIME_DIR, "logs", "anvil.log"), { flags: "a" });
-    anvil.child.stdout.on("data", (d) => out.write(d));
-    anvil.child.stderr?.on("data", (d) => out.write(d));
-  }
-
-  // 2) seed
-  process.stdout.write("[run-stack] seeding contracts + repo config\n");
+  // 1) seed (writes addresses.json from .env + live Base Sepolia constants)
+  process.stdout.write("[run-stack] seeding addresses.json from .env (Base Sepolia)\n");
   await new Promise<void>((res, rej) => {
     const seedLog = openSync(resolve(RUNTIME_DIR, "logs", "seed.log"), "a");
     const seedArgs = [
       "exec",
       "tsx",
       "demo/scripts/seed.ts",
-      "--rpc-url",
-      anvil.rpcUrl,
       "--coordinator-port",
       String(COORDINATOR_PORT),
       "--web-port",
       String(WEB_PORT),
     ];
-    if (forkUrl) seedArgs.push("--fork");
     const c = spawn("pnpm", seedArgs, { cwd: REPO_ROOT, stdio: ["ignore", seedLog, seedLog] });
     c.on("exit", (code) => (code === 0 ? res() : rej(new Error(`seed exited ${code}`))));
   });
   const rt = readRuntime();
 
-  // 3) coordinator. We pass each verifier's private key on the
-  // coordinator's env, scoped by `VERIFIER_<id>_PRIVATE_KEY`. That env
-  // surface flows through to whatever process invokes the x502-verify
-  // skill on this machine, since the skill helper (demo/scripts/x502.ts)
-  // reads the same scope ids via 1claw local mode.
-  const verifierKeyEnv: Record<string, string> = {};
-  for (const v of rt.verifiers) {
-    verifierKeyEnv[`VERIFIER_${v.agentId}_PRIVATE_KEY`] = v.privateKey;
+  if (!process.env.COORDINATOR_PRIVATE_KEY) {
+    throw new Error("COORDINATOR_PRIVATE_KEY missing — needed by the coordinator wallet");
   }
 
+  // 2) coordinator. Uses COORDINATOR_PRIVATE_KEY from process.env (sourced
+  // from .env). Each verifier's signing key flows through env as
+  // VERIFIER_<id>_PRIVATE_KEY for the x502-verify skill helper.
   process.stdout.write(`[run-stack] starting coordinator on :${rt.coordinator.port}\n`);
   const coordinator = spawnNode("coordinator", "packages/coordinator/src/main.ts", {
     COORDINATOR_PORT: String(rt.coordinator.port),
     ONECLAW_MODE: "local",
     COORDINATOR_ONECLAW_SCOPE_ID: "COORDINATOR_PRIVATE_KEY",
-    COORDINATOR_PRIVATE_KEY: rt.deployerKey,
     RPC_URL: rt.rpcUrl,
     COORDINATOR_CHAIN_ID: String(rt.chainId),
     VAULT_ADDRESS: rt.contracts.vault,
@@ -165,17 +140,12 @@ async function main() {
     COORDINATOR_THRESHOLD: String(rt.repo.threshold),
     COORDINATOR_TRUSTED_AGENT_IDS: rt.repo.trustedAgentIds.join(","),
     COORDINATOR_TRUSTED_ATTESTERS: rt.verifiers.map((v) => v.address).join(","),
-    COORDINATOR_FACT_TIMEOUT_MS: "30000",
-    COORDINATOR_ATTESTATION_TIMEOUT_MS: "300000",
+    COORDINATOR_FACT_TIMEOUT_MS: process.env.COORDINATOR_FACT_TIMEOUT_MS ?? "300000",
+    COORDINATOR_ATTESTATION_TIMEOUT_MS: process.env.COORDINATOR_ATTESTATION_TIMEOUT_MS ?? "900000",
   });
   procs.push({ name: "coordinator", child: coordinator });
 
-  // 4) auto-fulfill (DON simulator)
-  process.stdout.write("[run-stack] starting auto-fulfill watcher\n");
-  const fulfill = spawnNode("auto-fulfill", "demo/scripts/auto-fulfill.ts");
-  procs.push({ name: "auto-fulfill", child: fulfill });
-
-  // 5) web (Next.js)
+  // 3) web (Next.js)
   if (process.env.SKIP_WEB !== "1") {
     process.stdout.write(`[run-stack] starting web on :${rt.web.port}\n`);
     const web = spawnPnpm(
@@ -189,27 +159,26 @@ async function main() {
     procs.push({ name: "web", child: web });
   }
 
-  // 6) Wait for health
+  // 4) Wait for health
   await waitForHealth(`${rt.coordinator.endpoint}/health`, "coordinator");
 
   process.stdout.write("\n");
-  process.stdout.write("┌─ x502 demo stack ready ────────────────────────────┐\n");
+  process.stdout.write("┌─ x502 demo stack ready (Base Sepolia) ─────────────┐\n");
   process.stdout.write(
     `│ web         http://127.0.0.1:${rt.web.port}/?mode=demo${" ".repeat(Math.max(0, 14 - String(rt.web.port).length))}│\n`,
   );
   process.stdout.write(`│ coordinator ${rt.coordinator.endpoint}                       │\n`);
   process.stdout.write(`│ vault       ${rt.contracts.vault}     │\n`);
+  process.stdout.write("│ chain       Base Sepolia (84532)                   │\n");
   process.stdout.write("│ logs        demo/.runtime/logs/                    │\n");
   process.stdout.write("└────────────────────────────────────────────────────┘\n");
-  process.stdout.write("\nVerifiers run as the x502-verify Claude skill.\n");
+  process.stdout.write("\nVerifier runs as the x502-verify Claude skill.\n");
   process.stdout.write("In a separate terminal:\n");
-  process.stdout.write("  source demo/scripts/skill-env.sh   # exports verifier keys\n");
+  process.stdout.write("  source demo/scripts/skill-env.sh   # exports verifier key\n");
   process.stdout.write("  claude\n");
-  process.stdout.write("  > /x502-verify as agent 101\n\n");
+  process.stdout.write(`  > /x502-verify as agent ${rt.verifiers[0]?.agentId ?? "5260"}\n\n`);
   process.stdout.write("Ctrl-C to stop.\n");
 
-  // Write a helper script that exports the per-verifier keys for the
-  // operator's `claude` shell.
   writeSkillEnvScript(rt);
 
   await new Promise(() => {});
@@ -226,15 +195,17 @@ function writeSkillEnvScript(rt: ReturnType<typeof readRuntime>): void {
     `export X502_SCHEMA_UID=${rt.schemaUID}`,
     `export X502_CHAIN_ID=${rt.chainId}`,
     `export X502_REPO=${rt.repo.slug}`,
+    `export X502_RPC=${rt.rpcUrl}`,
   ];
   for (const v of rt.verifiers) {
     lines.push(`export VERIFIER_${v.agentId}_PRIVATE_KEY=${v.privateKey}`);
   }
-  writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o755 });
-}
-
-function truncate(s: string, max = 40): string {
-  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+  // 0o600 because the file embeds a private key. The `mode` option on
+  // writeFileSync only takes effect when the file is first created; if a
+  // pre-existing skill-env.sh was 0o755 it would stay world-readable. The
+  // explicit chmodSync after the write closes that footgun on every run.
+  writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 main().catch((e) => {

@@ -1,346 +1,140 @@
-/// Seeds an already-running anvil with the x502 demo state.
+/// Builds `demo/.runtime/addresses.json` for the Base Sepolia demo. Pure
+/// metadata: pulls live addresses + signing config from `.env` + the
+/// documented Base Sepolia constants. Does NOT deploy anything; the demo
+/// runs against the existing live BountyVault, GitHubFactReceiver, EAS,
+/// and SchemaRegistry on chain `84532`.
 ///
-///   tsx demo/scripts/seed.ts --rpc-url http://127.0.0.1:8545
-///                           [--coordinator-port 8787] [--web-port 3000]
-///                           [--fork]
+///   tsx demo/scripts/seed.ts
+///     [--coordinator-port 8787] [--web-port 3000]
 ///
-/// Without --fork (local mode):
-///   Deploys MockUSDC, MockAgentRegistry, MockGitHubFactProvider, MockEAS,
-///   then BountyVault wired to all of them with a deterministic local
-///   schemaUID (`keccak256("x502:" + schema)`).
-///
-/// With --fork (anvil --fork-url Base Sepolia):
-///   Deploys the same mocks for USDC + AgentRegistry + FactProvider but
-///   reuses the real EAS predeploy at 0x4200…0021 + SchemaRegistry at
-///   0x4200…0020. Registers the x502 schema (idempotent) and uses the
-///   resulting UID for the vault.
+/// Env (sourced from `.env` automatically if present):
+///   BASE_SEPOLIA_RPC_URL    required
+///   VAULT_ADDRESS           required (live BountyVault)
+///   FACT_PROVIDER_ADDRESS   required (live GitHubFactReceiver)
+///   VERIFIER_PRIVATE_KEY    required (signing key for trusted verifier 5260)
+///   VERIFIER_AGENT_ID       optional, defaults to 5260
+///   VERIFIER_REPO_SLUG      optional, defaults to skanislav/x502
+///   USDC_ADDRESS            optional, defaults to live Base Sepolia USDC
+///   COORDINATOR_THRESHOLD   optional, defaults to 1
 
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import {
-  http,
-  type Account,
-  type Address,
-  type Hex,
-  type PublicClient,
-  type WalletClient,
-  createPublicClient,
-  createWalletClient,
-  parseEther,
-  parseUnits,
-  toHex,
-} from "viem";
-import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { foundry } from "viem/chains";
 
-import { X502_SCHEMA, deployAll, repoIdFromSlug } from "@x502/shared";
-import {
-  bountyVaultAbi,
-  bountyVaultBytecode,
-  mockAgentRegistryAbi,
-  mockAgentRegistryBytecode,
-  mockGitHubFactProviderAbi,
-  mockGitHubFactProviderBytecode,
-  mockUSDCAbi,
-  mockUSDCBytecode,
-} from "@x502/shared/abis";
+import { type Address, type Hex, isAddress, isHex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 
+import { repoIdFromSlug } from "@x502/shared";
+
+import { loadDotEnv } from "./lib/load-env.js";
 import { type DemoRuntime, writeRuntime } from "./lib/runtime.js";
 
-const ANVIL_DEPLOYER_KEY =
-  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as Hex;
-const REPO_SLUG = "skanislav/x502";
-const VERIFIER_AGENT_IDS = [101n, 102n, 103n] as const;
-const VERIFIER_PORTS = [9001, 9002, 9003] as const;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = resolve(__dirname, "..", "..");
 
-/// Optimism / Base canonical predeploys for EAS + SchemaRegistry — same
-/// addresses across mainnet + sepolia. https://docs.attest.org/
+const BASE_SEPOLIA_CHAIN_ID = 84532;
+
+/// Optimism / Base canonical predeploy for EAS — same address across mainnet
+/// + Base Sepolia. https://docs.attest.org/
 const EAS_PREDEPLOY = "0x4200000000000000000000000000000000000021" as Address;
-const SCHEMA_REGISTRY_PREDEPLOY = "0x4200000000000000000000000000000000000020" as Address;
 
-const SCHEMA_REGISTRY_ABI = [
-  {
-    type: "function",
-    name: "register",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "schema", type: "string" },
-      { name: "resolver", type: "address" },
-      { name: "revocable", type: "bool" },
-    ],
-    outputs: [{ name: "", type: "bytes32" }],
-  },
-  {
-    type: "function",
-    name: "getSchema",
-    stateMutability: "view",
-    inputs: [{ name: "uid", type: "bytes32" }],
-    outputs: [
-      {
-        name: "",
-        type: "tuple",
-        components: [
-          { name: "uid", type: "bytes32" },
-          { name: "resolver", type: "address" },
-          { name: "revocable", type: "bool" },
-          { name: "schema", type: "string" },
-        ],
-      },
-    ],
-  },
-] as const;
+/// x502 schema UID on Base Sepolia, registered once via SchemaRegistry.
+/// `keccak256(abi.encodePacked(schema, resolver, revocable))` for
+/// `bytes32 claimId,bytes32 factHash,bool accept`.
+const X502_SCHEMA_UID = "0x5dcd6b7851d582fe235f915024912fe525f2fc63cd477511182213c1b065e3c6" as Hex;
+
+/// ERC-8004 IdentityRegistry on Base Sepolia. See docs/runbook-base-sepolia.md.
+const ERC_8004_REGISTRY = "0x8004A818BFB912233c491871b3d84c89A494BD9e" as Address;
+
+/// Circle USDC on Base Sepolia.
+const DEFAULT_USDC = "0x036CbD53842c5426634e7929541eC2318f3dCF7e" as Address;
+
+const DEFAULT_AGENT_ID = "5260";
+const DEFAULT_REPO_SLUG = "skanislav/x502";
+const DEFAULT_THRESHOLD = 1;
+
+function required(name: string): string {
+  const v = process.env[name];
+  if (!v) throw new Error(`missing required env ${name} (source .env first)`);
+  return v;
+}
+
+function asAddress(name: string, value: string): Address {
+  if (!isAddress(value)) throw new Error(`${name} is not a 0x-address: ${value}`);
+  return value as Address;
+}
+
+function asHex(name: string, value: string): Hex {
+  if (!isHex(value)) throw new Error(`${name} is not 0x-hex: ${value}`);
+  return value as Hex;
+}
 
 async function main() {
+  loadDotEnv(REPO_ROOT);
+
   const { values } = parseArgs({
     options: {
-      "rpc-url": { type: "string" },
       "coordinator-port": { type: "string" },
       "web-port": { type: "string" },
-      fork: { type: "boolean" },
     },
   });
-  const rpcUrl = values["rpc-url"] ?? process.env.RPC_URL ?? "http://127.0.0.1:8545";
   const coordinatorPort = Number(values["coordinator-port"] ?? "8787");
   const webPort = Number(values["web-port"] ?? "3000");
-  const fork = !!values.fork;
 
-  const deployer = privateKeyToAccount(ANVIL_DEPLOYER_KEY);
-  const transport = http(rpcUrl);
-  const publicClient = createPublicClient({ transport, chain: foundry, pollingInterval: 200 });
-  const wallet = createWalletClient({ transport, chain: foundry, account: deployer });
+  const rpcUrl = required("BASE_SEPOLIA_RPC_URL");
+  const vault = asAddress("VAULT_ADDRESS", required("VAULT_ADDRESS"));
+  const factProvider = asAddress("FACT_PROVIDER_ADDRESS", required("FACT_PROVIDER_ADDRESS"));
+  const usdc = asAddress("USDC_ADDRESS", process.env.USDC_ADDRESS ?? DEFAULT_USDC);
+  const verifierKey = asHex("VERIFIER_PRIVATE_KEY", required("VERIFIER_PRIVATE_KEY"));
+  const verifierAccount = privateKeyToAccount(verifierKey);
 
-  let easAddress: Address;
-  let schemaUID: Hex;
-  let usdc: Address;
-  let registry: Address;
-  let factProvider: Address;
-  let vault: Address;
-
-  if (fork) {
-    process.stdout.write("[seed] FORK MODE — using real EAS + SchemaRegistry predeploys\n");
-    easAddress = EAS_PREDEPLOY;
-    // Register schema (idempotent — try, then read on revert).
-    schemaUID = await ensureSchemaRegistered(
-      publicClient as unknown as PublicClient,
-      wallet as unknown as WalletClient,
-      deployer,
-    );
-    process.stdout.write(`[seed]   eas=${easAddress}\n`);
-    process.stdout.write(`[seed]   schemaUID=${schemaUID}\n`);
-
-    // Still deploy mock USDC + registry + factProvider so the demo is
-    // self-contained (real USDC on Base Sepolia would require sourcing
-    // testnet funds for the repo owner).
-    const pc = publicClient as unknown as PublicClient;
-    const wc = wallet as unknown as WalletClient;
-    usdc = await deployBytecode(pc, wc, deployer, mockUSDCAbi, mockUSDCBytecode);
-    registry = await deployBytecode(
-      pc,
-      wc,
-      deployer,
-      mockAgentRegistryAbi,
-      mockAgentRegistryBytecode,
-    );
-    factProvider = await deployBytecode(
-      pc,
-      wc,
-      deployer,
-      mockGitHubFactProviderAbi,
-      mockGitHubFactProviderBytecode,
-    );
-    vault = await deployBytecode(pc, wc, deployer, bountyVaultAbi, bountyVaultBytecode, [
-      usdc,
-      registry,
-      factProvider,
-      easAddress,
-      schemaUID,
-    ]);
-  } else {
-    process.stdout.write("[seed] LOCAL MODE — deploying MockEAS\n");
-    const all = await deployAll(
-      publicClient as unknown as PublicClient,
-      wallet as unknown as WalletClient,
-      deployer as Account,
-    );
-    easAddress = all.eas;
-    schemaUID = all.schemaUID;
-    usdc = all.usdc;
-    registry = all.registry;
-    factProvider = all.factProvider;
-    vault = all.vault;
-    process.stdout.write(`[seed]   eas=${easAddress}\n`);
-    process.stdout.write(`[seed]   schemaUID=${schemaUID}\n`);
-  }
-  process.stdout.write(`[seed]   usdc=${usdc}\n`);
-  process.stdout.write(`[seed]   registry=${registry}\n`);
-  process.stdout.write(`[seed]   factProvider=${factProvider}\n`);
-  process.stdout.write(`[seed]   vault=${vault}\n`);
-
-  const verifiers: DemoRuntime["verifiers"] = VERIFIER_AGENT_IDS.map((agentId, i) => {
-    const pk = generatePrivateKey();
-    const acc = privateKeyToAccount(pk);
-    return {
-      agentId: agentId.toString(),
-      privateKey: pk,
-      address: acc.address as Address,
-      endpoint: `http://127.0.0.1:${VERIFIER_PORTS[i]}`,
-      port: VERIFIER_PORTS[i]!,
-    };
-  });
-
-  const verifierGas = parseEther("1");
-  process.stdout.write("[seed] funding verifier wallets for EAS gas\n");
-  for (const v of verifiers) {
-    await setAnvilBalance(rpcUrl, v.address, verifierGas);
-  }
-
-  process.stdout.write("[seed] registering verifier wallets\n");
-  for (const v of verifiers) {
-    await wallet.writeContract({
-      address: registry,
-      abi: mockAgentRegistryAbi,
-      functionName: "setAgentWallet",
-      args: [BigInt(v.agentId), v.address],
-      chain: null,
-      account: deployer as Account,
-    });
-  }
-
-  const repoId = repoIdFromSlug(REPO_SLUG);
-  const prices = {
-    report: parseUnits("0.05", 6),
-    triage: parseUnits("0.02", 6),
-    fix: parseUnits("0.5", 6),
-    docsTests: parseUnits("0.3", 6),
-  };
-  const outcomeFee = 1_000n;
-  const threshold = 2;
-
-  process.stdout.write(`[seed] configuring repo ${REPO_SLUG}\n`);
-  await wallet.writeContract({
-    address: vault,
-    abi: bountyVaultAbi,
-    functionName: "configureRepo",
-    args: [repoId, VERIFIER_AGENT_IDS, threshold, prices, outcomeFee],
-    chain: null,
-    account: deployer as Account,
-  });
-
-  const funding = parseUnits("2", 6);
-  process.stdout.write("[seed] funding vault with 2 USDC\n");
-  await wallet.writeContract({
-    address: usdc,
-    abi: mockUSDCAbi,
-    functionName: "mint",
-    args: [deployer.address, funding],
-    chain: null,
-    account: deployer as Account,
-  });
-  await wallet.writeContract({
-    address: usdc,
-    abi: mockUSDCAbi,
-    functionName: "approve",
-    args: [vault, funding],
-    chain: null,
-    account: deployer as Account,
-  });
-  await wallet.writeContract({
-    address: vault,
-    abi: bountyVaultAbi,
-    functionName: "deposit",
-    args: [repoId, funding],
-    chain: null,
-    account: deployer as Account,
-  });
+  const agentId = process.env.VERIFIER_AGENT_ID ?? DEFAULT_AGENT_ID;
+  const repoSlug = process.env.VERIFIER_REPO_SLUG ?? DEFAULT_REPO_SLUG;
+  const repoId = repoIdFromSlug(repoSlug);
+  const threshold = Number(process.env.COORDINATOR_THRESHOLD ?? String(DEFAULT_THRESHOLD));
 
   const rt: DemoRuntime = {
     rpcUrl,
-    chainId: foundry.id,
-    deployerKey: ANVIL_DEPLOYER_KEY,
-    contracts: { usdc, registry, factProvider, vault, eas: easAddress },
-    schemaUID,
+    chainId: BASE_SEPOLIA_CHAIN_ID,
+    contracts: {
+      usdc,
+      registry: ERC_8004_REGISTRY,
+      factProvider,
+      vault,
+      eas: EAS_PREDEPLOY,
+    },
+    schemaUID: X502_SCHEMA_UID,
     repo: {
-      slug: REPO_SLUG,
+      slug: repoSlug,
       repoId,
       threshold,
-      trustedAgentIds: VERIFIER_AGENT_IDS.map((id) => id.toString()),
+      trustedAgentIds: [agentId],
     },
-    verifiers,
-    coordinator: { endpoint: `http://127.0.0.1:${coordinatorPort}`, port: coordinatorPort },
+    verifiers: [
+      {
+        agentId,
+        privateKey: verifierKey,
+        address: verifierAccount.address as Address,
+        endpoint: "",
+        port: 0,
+      },
+    ],
+    coordinator: {
+      endpoint: `http://127.0.0.1:${coordinatorPort}`,
+      port: coordinatorPort,
+    },
     web: { port: webPort },
   };
+
   writeRuntime(rt);
-  process.stdout.write("[seed] wrote demo/.runtime/addresses.json\n");
-}
-
-async function ensureSchemaRegistered(
-  publicClient: PublicClient,
-  wallet: WalletClient,
-  account: Account,
-): Promise<Hex> {
-  // EAS computes UID = keccak256(abi.encodePacked(schema, resolver, revocable))
-  const { keccak256, encodePacked } = await import("viem");
-  const expectedUID = keccak256(
-    encodePacked(
-      ["string", "address", "bool"],
-      [X502_SCHEMA, "0x0000000000000000000000000000000000000000", true],
-    ),
-  );
-
-  const existing = (await publicClient.readContract({
-    address: SCHEMA_REGISTRY_PREDEPLOY,
-    abi: SCHEMA_REGISTRY_ABI,
-    functionName: "getSchema",
-    args: [expectedUID],
-  } as never)) as { uid: Hex };
-  if (existing.uid === expectedUID) return expectedUID;
-
-  process.stdout.write("[seed]   registering x502 schema\n");
-  const txHash = await wallet.writeContract({
-    address: SCHEMA_REGISTRY_PREDEPLOY,
-    abi: SCHEMA_REGISTRY_ABI,
-    functionName: "register",
-    args: [X502_SCHEMA, "0x0000000000000000000000000000000000000000", true],
-    chain: null,
-    account,
-  });
-  await publicClient.waitForTransactionReceipt({ hash: txHash });
-  return expectedUID;
-}
-
-async function deployBytecode(
-  publicClient: PublicClient,
-  wallet: WalletClient,
-  account: Account,
-  abi: readonly unknown[],
-  bytecode: Hex,
-  args: readonly unknown[] = [],
-): Promise<Address> {
-  const tx = await wallet.deployContract({
-    abi: abi as never,
-    bytecode,
-    args: args as never,
-    account,
-    chain: null,
-  });
-  const r = await publicClient.waitForTransactionReceipt({ hash: tx });
-  if (!r.contractAddress) throw new Error(`deploy returned no address (tx=${tx})`);
-  return r.contractAddress;
-}
-
-async function setAnvilBalance(rpcUrl: string, address: Address, balance: bigint): Promise<void> {
-  const r = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "anvil_setBalance",
-      params: [address, toHex(balance)],
-    }),
-  });
-  if (!r.ok) throw new Error(`anvil_setBalance HTTP ${r.status}`);
-  const body = (await r.json()) as { error?: { message?: string } };
-  if (body.error) throw new Error(`anvil_setBalance failed: ${body.error.message ?? "unknown"}`);
+  process.stdout.write("[seed] wrote demo/.runtime/addresses.json (Base Sepolia)\n");
+  process.stdout.write(`[seed]   chainId=${BASE_SEPOLIA_CHAIN_ID}\n`);
+  process.stdout.write(`[seed]   vault=${vault}\n`);
+  process.stdout.write(`[seed]   factProvider=${factProvider}\n`);
+  process.stdout.write(`[seed]   eas=${EAS_PREDEPLOY}\n`);
+  process.stdout.write(`[seed]   schemaUID=${X502_SCHEMA_UID}\n`);
+  process.stdout.write(`[seed]   verifier agent=${agentId} addr=${verifierAccount.address}\n`);
+  process.stdout.write(`[seed]   repo=${repoSlug} threshold=${threshold}\n`);
 }
 
 main().catch((e) => {

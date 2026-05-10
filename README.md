@@ -8,7 +8,12 @@ the threshold is met.
 
 ## Demo Quick Start
 
-Run the local end-to-end demo:
+The demo runs end-to-end against **live Base Sepolia** — there is no
+local-chain mode. You need a funded `.env` (see `.env.example`); at minimum:
+`BASE_SEPOLIA_RPC_URL`, `PRIVATE_KEY` (repo-owner / deployer with USDC),
+`COORDINATOR_PRIVATE_KEY` (with Base Sepolia ETH for gas),
+`VERIFIER_PRIVATE_KEY` (registered in ERC-8004 as agent `5260`),
+`VAULT_ADDRESS`, `FACT_PROVIDER_ADDRESS`, `CHAINLINK_SUBSCRIPTION_ID`.
 
 ```sh
 pnpm install
@@ -17,10 +22,12 @@ pnpm demo
 
 The demo starts:
 
-- anvil on `http://127.0.0.1:8545`
-- coordinator on `http://127.0.0.1:8787`
+- coordinator on `http://127.0.0.1:8787` wired to the live Base Sepolia
+  vault, fact receiver, and EAS
 - web UI on `http://127.0.0.1:3000/?mode=demo`
-- local Chainlink Functions simulator
+
+There is no local anvil, no mock contracts, and no Chainlink simulator —
+all on-chain calls hit Base Sepolia (chain `84532`).
 
 Then load verifier keys and run the verifier skill from Claude Code:
 
@@ -32,8 +39,7 @@ claude
 Inside Claude Code:
 
 ```text
-> /x502-verify as agent 101
-> /x502-verify as agent 102
+> /x502-verify as agent 5260
 ```
 
 The UI should advance through claim, fact, EAS attestation, and payout.
